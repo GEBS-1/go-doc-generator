@@ -282,28 +282,96 @@ export async function generateTextWithGigaChat(
 }
 
 /**
- * Генерирует структуру документа на основе темы
+ * Типы документов и их характеристики
  */
-export async function generateDocumentStructure(theme: string): Promise<Array<{
+export const documentTypes = {
+  essay: { 
+    name: 'Реферат', 
+    minSections: 3, 
+    maxSections: 7, 
+    targetChars: 5000,
+    description: 'Краткий обзор темы с основными выводами'
+  },
+  courseWork: { 
+    name: 'Курсовая работа', 
+    minSections: 5, 
+    maxSections: 10, 
+    targetChars: 15000,
+    description: 'Исследование с практической частью'
+  },
+  diploma: { 
+    name: 'Дипломная работа', 
+    minSections: 8, 
+    maxSections: 15, 
+    targetChars: 40000,
+    description: 'Полноценное исследование с глубоким анализом'
+  },
+  article: { 
+    name: 'Научная статья', 
+    minSections: 3, 
+    maxSections: 6, 
+    targetChars: 12000,
+    description: 'Краткое исследование для публикации'
+  },
+  report: { 
+    name: 'Отчёт', 
+    minSections: 4, 
+    maxSections: 8, 
+    targetChars: 10000,
+    description: 'Структурированный отчёт о проделанной работе'
+  },
+} as const;
+
+export type DocumentType = keyof typeof documentTypes;
+
+/**
+ * Генерирует структуру документа на основе темы и типа документа
+ */
+export async function generateDocumentStructure(
+  theme: string,
+  docType: DocumentType
+): Promise<Array<{
   title: string;
   description: string;
+  estimatedChars: number;
+  subsections: string[];
 }>> {
-  const prompt = `Создай структуру академического документа на тему: "${theme}"
+  const docTypeInfo = documentTypes[docType];
+  
+  const prompt = `Создай детальную структуру ${docTypeInfo.name.toLowerCase()} на тему: "${theme}"
+
+Требования к структуре:
+- Количество разделов: ${docTypeInfo.minSections}-${docTypeInfo.maxSections}
+- Целевой объём: ${docTypeInfo.targetChars.toLocaleString('ru-RU')} символов
+- Стиль: академический, научный
 
 Верни только JSON массив объектов с полями:
 - title: название раздела
-- description: краткое описание содержания раздела
+- description: подробное описание содержания раздела
+- estimatedChars: ориентировочный объём раздела в символах
+- subsections: массив подразделов или ключевых пунктов
 
 Формат JSON:
 [
-  {"title": "Введение", "description": "..."},
-  {"title": "Основная часть", "description": "..."},
-  {"title": "Заключение", "description": "..."}
+  {
+    "title": "Введение",
+    "description": "Актуальность темы, цели и задачи исследования...",
+    "estimatedChars": 1000,
+    "subsections": ["Актуальность темы", "Цель исследования", "Задачи"]
+  },
+  {
+    "title": "Основная часть",
+    "description": "...",
+    "estimatedChars": 3000,
+    "subsections": [...]
+  }
 ]
+
+ВАЖНО: Последний раздел должен быть "Список использованной литературы" с описанием "Список источников по ГОСТ/APA".
 
 Не добавляй никакого дополнительного текста, только JSON.`;
 
-  const systemPrompt = `Ты - помощник для создания академических документов. Создавай структурированные, профессиональные разделы для документов.`;
+  const systemPrompt = `Ты - эксперт по созданию академических документов. Создавай профессиональные, структурированные разделы в соответствии с требованиями к типу документа.`;
 
   try {
     const response = await generateTextWithGigaChat(prompt, systemPrompt);
@@ -319,6 +387,21 @@ export async function generateDocumentStructure(theme: string): Promise<Array<{
     // Валидация структуры
     if (!Array.isArray(structure) || structure.length === 0) {
       throw new GigaChatError('INVALID_STRUCTURE', 'Неверная структура документа');
+    }
+
+    // Добавляем библиографию если её нет
+    const hasBibliography = structure.some(s => 
+      s.title.toLowerCase().includes('литература') || 
+      s.title.toLowerCase().includes('источники')
+    );
+    
+    if (!hasBibliography) {
+      structure.push({
+        title: 'Список использованной литературы',
+        description: 'Перечень источников, использованных в работе, оформленных по ГОСТ или APA',
+        estimatedChars: 1000,
+        subsections: ['Отечественные источники', 'Зарубежные источники']
+      });
     }
     
     return structure;

@@ -2,11 +2,19 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sparkles, Lightbulb } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Sparkles, Lightbulb, BookOpen, FileText, GraduationCap, Newspaper, FileCheck } from "lucide-react";
 import { toast } from "sonner";
+import { DocumentType, documentTypes } from "@/lib/gigachat";
 
 interface ThemeInputProps {
-  onNext: (theme: string) => void;
+  onNext: (theme: string, docType: DocumentType) => void;
 }
 
 const exampleThemes = [
@@ -16,8 +24,20 @@ const exampleThemes = [
   "Кибербезопасность в корпоративной среде",
 ];
 
+const getDocumentTypeIcon = (type: DocumentType) => {
+  const icons = {
+    essay: BookOpen,
+    courseWork: FileText,
+    diploma: GraduationCap,
+    article: Newspaper,
+    report: FileCheck,
+  };
+  return icons[type] || FileText;
+};
+
 export const ThemeInput = ({ onNext }: ThemeInputProps) => {
   const [theme, setTheme] = useState("");
+  const [docType, setDocType] = useState<DocumentType>("courseWork");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,8 +52,9 @@ export const ThemeInput = ({ onNext }: ThemeInputProps) => {
       return;
     }
     
-    toast.success("Генерируем структуру документа...");
-    onNext(theme);
+    const docTypeInfo = documentTypes[docType];
+    toast.success(`Генерируем структуру ${docTypeInfo.name.toLowerCase()}...`);
+    onNext(theme, docType);
   };
 
   const handleExampleClick = (example: string) => {
@@ -56,6 +77,36 @@ export const ThemeInput = ({ onNext }: ThemeInputProps) => {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="space-y-3">
+          <Label htmlFor="docType" className="text-base font-semibold">
+            Тип документа
+          </Label>
+          <Select value={docType} onValueChange={(value) => setDocType(value as DocumentType)}>
+            <SelectTrigger className="h-14 text-base">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(documentTypes).map(([key, info]) => {
+                const Icon = getDocumentTypeIcon(key as DocumentType);
+                return (
+                  <SelectItem key={key} value={key}>
+                    <div className="flex items-center gap-2">
+                      <Icon className="h-4 w-4" />
+                      <div>
+                        <div className="font-semibold">{info.name}</div>
+                        <div className="text-xs text-muted-foreground">{info.description}</div>
+                      </div>
+                    </div>
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+          <p className="text-sm text-muted-foreground">
+            {documentTypes[docType].name} • ~{documentTypes[docType].targetChars.toLocaleString('ru-RU')} символов • {documentTypes[docType].minSections}-{documentTypes[docType].maxSections} разделов
+          </p>
+        </div>
+
         <div className="space-y-3">
           <Label htmlFor="theme" className="text-base font-semibold">
             Тема документа

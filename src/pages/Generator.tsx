@@ -7,12 +7,15 @@ import { StructureEditor } from "@/components/steps/StructureEditor";
 import { TextGeneration } from "@/components/steps/TextGeneration";
 import { DocumentEditor } from "@/components/steps/DocumentEditor";
 import { TitlePage } from "@/components/steps/TitlePage";
+import { DocumentType } from "@/lib/gigachat";
 
 interface Section {
   id: string;
   title: string;
   description: string;
   content?: string;
+  estimatedChars?: number;
+  subsections?: string[];
 }
 
 const steps = [
@@ -26,10 +29,12 @@ const steps = [
 const Generator = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [theme, setTheme] = useState("");
+  const [docType, setDocType] = useState<DocumentType>("courseWork");
   const [sections, setSections] = useState<Section[]>([]);
 
-  const handleThemeNext = (newTheme: string) => {
+  const handleThemeNext = (newTheme: string, newDocType: DocumentType) => {
     setTheme(newTheme);
+    setDocType(newDocType);
     setCurrentStep(2);
   };
 
@@ -62,6 +67,7 @@ const Generator = () => {
             {currentStep === 2 && (
               <StructureEditor
                 theme={theme}
+                docType={docType}
                 onNext={handleStructureNext}
                 onBack={() => setCurrentStep(1)}
               />
