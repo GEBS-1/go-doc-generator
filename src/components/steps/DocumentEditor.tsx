@@ -19,30 +19,8 @@ interface DocumentEditorProps {
   onBack: () => void;
 }
 
-const generateMockContent = (title: string, description: string) => {
-  return `${title}
-
-${description}
-
-Данный раздел содержит подробный анализ заявленной темы. В рамках исследования были рассмотрены ключевые аспекты и проведён всесторонний анализ существующих подходов.
-
-Основные положения:
-• Первое ключевое положение, раскрывающее основную идею раздела
-• Второе положение с детальным описанием методологии
-• Третье положение о практическом применении результатов
-
-Результаты анализа показывают значимость рассматриваемых аспектов для общего понимания темы. Детальное изучение позволило выявить ключевые закономерности и тенденции.
-
-На основании проведённого исследования можно сделать вывод о необходимости дальнейшего изучения данного вопроса с учётом современных реалий и перспектив развития.`;
-};
-
 export const DocumentEditor = ({ sections: initialSections, onNext, onBack }: DocumentEditorProps) => {
-  const [sections, setSections] = useState<Section[]>(
-    initialSections.map((s) => ({
-      ...s,
-      content: generateMockContent(s.title, s.description),
-    }))
-  );
+  const [sections, setSections] = useState<Section[]>(initialSections);
   const [activeTab, setActiveTab] = useState("edit");
 
   const handleContentChange = (id: string, content: string) => {

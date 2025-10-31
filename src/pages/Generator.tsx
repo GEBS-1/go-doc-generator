@@ -38,7 +38,8 @@ const Generator = () => {
     setCurrentStep(3);
   };
 
-  const handleGenerationComplete = () => {
+  const handleGenerationComplete = (generatedSections: Section[]) => {
+    setSections(generatedSections);
     setCurrentStep(4);
   };
 
@@ -69,6 +70,7 @@ const Generator = () => {
             {currentStep === 3 && (
               <TextGeneration
                 sections={sections}
+                theme={theme}
                 onComplete={handleGenerationComplete}
               />
             )}

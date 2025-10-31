@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/select";
 import { Download, FileCheck } from "lucide-react";
 import { toast } from "sonner";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, SectionType } from "docx";
+import { saveAs } from "file-saver";
 
 interface Section {
   id: string;
@@ -37,22 +39,214 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
     template: "gost",
   });
 
+  const generateDocxDocument = async () => {
+    try {
+      // Validate required fields
+      if (!formData.organization || !formData.title || !formData.author) {
+        toast.error("Заполните обязательные поля");
+        return;
+      }
+
+      toast.loading("Создание документа...");
+
+      // Prepare title page content
+      const titlePageContent: Paragraph[] = [];
+      
+      // Organization name (centered, top)
+      if (formData.organization) {
+        titlePageContent.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: formData.organization,
+                bold: true,
+                size: 28,
+              }),
+            ],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 200 },
+          })
+        );
+      }
+
+      // Department (centered, below organization)
+      if (formData.department) {
+        titlePageContent.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: formData.department,
+                size: 24,
+              }),
+            ],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 400 },
+          })
+        );
+      }
+
+      // Document type
+      const docType = formData.template === "gost"
+        ? "КУРСОВАЯ РАБОТА"
+        : formData.template === "business"
+        ? "АНАЛИТИЧЕСКИЙ ОТЧЁТ"
+        : "ДОКУМЕНТ";
+      
+      titlePageContent.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: docType,
+              size: 20,
+              italics: true,
+            }),
+          ],
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 1200, after: 400 },
+        })
+      );
+
+      // Title
+      titlePageContent.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: formData.title,
+              bold: true,
+              size: 24,
+            }),
+          ],
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 400 },
+        })
+      );
+
+      // Author and supervisor section
+      if (formData.supervisor) {
+        titlePageContent.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: `Руководитель: ${formData.supervisor}`,
+                size: 22,
+              }),
+            ],
+            alignment: AlignmentType.RIGHT,
+            spacing: { after: 200 },
+          })
+        );
+      }
+      
+      titlePageContent.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: `Автор: ${formData.author}`,
+              size: 22,
+            }),
+          ],
+          alignment: AlignmentType.RIGHT,
+          spacing: { after: 800 },
+        })
+      );
+
+      // Location and year
+      const locationYear = [formData.city, formData.year].filter(Boolean).join(", ");
+      if (locationYear) {
+        titlePageContent.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: locationYear,
+                size: 22,
+              }),
+            ],
+            alignment: AlignmentType.RIGHT,
+            spacing: { after: 400 },
+          })
+        );
+      }
+
+      // Prepare document sections
+      const documentSections: Paragraph[] = [];
+
+      // Add each section with its content
+      sections.forEach((section, index) => {
+        // Section title
+        documentSections.push(
+          new Paragraph({
+            text: `${index + 1}. ${section.title}`,
+            heading: HeadingLevel.HEADING_1,
+            spacing: { before: 400, after: 200 },
+          })
+        );
+
+        // Section content
+        if (section.content) {
+          const lines = section.content.split('\n').filter(line => line.trim());
+          lines.forEach(line => {
+            if (line.startsWith('•')) {
+              // Bullet point
+              documentSections.push(
+                new Paragraph({
+                  text: line,
+                  bullet: { level: 0 },
+                  spacing: { after: 120 },
+                })
+              );
+            } else {
+              documentSections.push(
+                new Paragraph({
+                  text: line,
+                  spacing: { after: 120 },
+                })
+              );
+            }
+          });
+        } else {
+          documentSections.push(
+            new Paragraph({
+              text: section.description || "",
+              italics: true,
+              spacing: { after: 400 },
+            })
+          );
+        }
+      });
+
+      // Create the document
+      const doc = new Document({
+        sections: [
+          {
+            properties: {
+              type: SectionType.NEXT_PAGE,
+            },
+            children: [
+              // Title page
+              ...titlePageContent,
+              // Content sections
+              ...documentSections,
+            ],
+          },
+        ],
+      });
+
+      // Generate and save the document
+      const blob = await Packer.toBlob(doc);
+      saveAs(blob, `${formData.title || "document"}.docx`);
+      
+      toast.dismiss();
+      toast.success("Документ скачан успешно!");
+    } catch (error) {
+      toast.dismiss();
+      toast.error("Ошибка при создании документа");
+      console.error("Error generating document:", error);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Validation
-    if (!formData.organization || !formData.title || !formData.author) {
-      toast.error("Заполните обязательные поля");
-      return;
-    }
-
-    toast.success("Документ готов к скачиванию!");
-    toast.info("В демо-режиме файл будет содержать водяной знак");
-    
-    // Simulate download
-    setTimeout(() => {
-      toast.success("Документ скачан успешно!");
-    }, 1000);
+    generateDocxDocument();
   };
 
   const handleInputChange = (field: string, value: string) => {

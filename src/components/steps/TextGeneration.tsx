@@ -1,48 +1,102 @@
 import { useEffect, useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import { Card } from "@/components/ui/card";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, AlertCircle } from "lucide-react";
+import { generateSectionContent } from "@/lib/gigachat";
+import { toast } from "sonner";
 
 interface Section {
   id: string;
   title: string;
   description: string;
+  content?: string;
 }
 
 interface TextGenerationProps {
   sections: Section[];
-  onComplete: () => void;
+  theme: string;
+  onComplete: (generatedSections: Section[]) => void;
 }
 
-export const TextGeneration = ({ sections, onComplete }: TextGenerationProps) => {
+export const TextGeneration = ({ sections, theme, onComplete }: TextGenerationProps) => {
   const [currentSection, setCurrentSection] = useState(0);
   const [progress, setProgress] = useState(0);
+  const [generatedSections, setGeneratedSections] = useState<Section[]>([]);
+  const [hasApiKey, setHasApiKey] = useState(true);
 
   useEffect(() => {
-    const totalSections = sections.length;
-    const timePerSection = 2000; // 2 seconds per section
+    const clientId = import.meta.env.VITE_GIGACHAT_CLIENT_ID;
+    const clientSecret = import.meta.env.VITE_GIGACHAT_CLIENT_SECRET;
+    setHasApiKey(!!(clientId && clientSecret));
 
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        const newProgress = prev + (100 / totalSections / 20);
-        if (newProgress >= 100) {
-          clearInterval(interval);
-          setTimeout(() => onComplete(), 500);
-          return 100;
-        }
-        return newProgress;
-      });
+    const generateContent = async () => {
+      const sectionsWithContent: Section[] = [];
+      
+      for (let i = 0; i < sections.length; i++) {
+        setCurrentSection(i);
+        setProgress(((i + 1) / sections.length) * 90); // Leave 10% for completion
 
-      if (currentSection < totalSections - 1) {
-        const sectionInterval = timePerSection / (100 / totalSections);
-        if (progress >= ((currentSection + 1) * 100) / totalSections) {
-          setCurrentSection((prev) => prev + 1);
+        try {
+          let content: string;
+          
+          if (clientId && clientSecret) {
+            // Real AI generation
+            content = await generateSectionContent(
+              sections[i].title,
+              sections[i].description,
+              theme
+            );
+          } else {
+            // Fallback mock content
+            content = generateMockContent(sections[i].title, sections[i].description);
+            // Add delay to simulate generation
+            await new Promise(resolve => setTimeout(resolve, 1500));
+          }
+
+          sectionsWithContent.push({
+            ...sections[i],
+            content,
+          });
+        } catch (error) {
+          console.error(`Error generating content for section ${i + 1}:`, error);
+          toast.error(`Ошибка при генерации раздела: ${sections[i].title}`);
+          
+          // Use mock content as fallback
+          sectionsWithContent.push({
+            ...sections[i],
+            content: generateMockContent(sections[i].title, sections[i].description),
+          });
         }
       }
-    }, 100);
 
-    return () => clearInterval(interval);
-  }, [sections.length, onComplete, currentSection, progress]);
+      setGeneratedSections(sectionsWithContent);
+      setProgress(100);
+      
+      // Wait a bit before completing
+      setTimeout(() => {
+        onComplete(sectionsWithContent);
+      }, 500);
+    };
+
+    generateContent();
+  }, [sections, theme, onComplete]);
+
+  const generateMockContent = (title: string, description: string): string => {
+    return `${title}
+
+${description}
+
+Данный раздел содержит подробный анализ заявленной темы. В рамках исследования были рассмотрены ключевые аспекты и проведён всесторонний анализ существующих подходов.
+
+Основные положения:
+• Первое ключевое положение, раскрывающее основную идею раздела
+• Второе положение с детальным описанием методологии
+• Третье положение о практическом применении результатов
+
+Результаты анализа показывают значимость рассматриваемых аспектов для общего понимания темы. Детальное изучение позволило выявить ключевые закономерности и тенденции.
+
+На основании проведённого исследования можно сделать вывод о необходимости дальнейшего изучения данного вопроса с учётом современных реалий и перспектив развития.`;
+  };
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -122,6 +176,14 @@ export const TextGeneration = ({ sections, onComplete }: TextGenerationProps) =>
       </div>
 
       <div className="text-center p-6 rounded-xl bg-secondary/50 border border-border">
+        {!hasApiKey && (
+          <div className="mb-4 flex items-center gap-2 justify-center text-amber-600">
+            <AlertCircle className="h-5 w-5" />
+            <p className="text-sm font-semibold">
+              GigaChat API ключ не настроен. Используется демо-режим.
+            </p>
+          </div>
+        )}
         <p className="text-muted-foreground">
           Пожалуйста, подождите. Это займёт несколько секунд...
         </p>
