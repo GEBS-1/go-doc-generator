@@ -239,7 +239,22 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
       toast.success("Документ скачан успешно!");
     } catch (error) {
       toast.dismiss();
-      toast.error("Ошибка при создании документа");
+      
+      // Улучшенная обработка ошибок
+      let errorMessage = "Ошибка при создании документа";
+      if (error instanceof Error) {
+        if (error.message.includes("Blob")) {
+          errorMessage = "Недостаточно памяти для создания документа";
+        } else if (error.message.includes("saveAs")) {
+          errorMessage = "Проблема с сохранением файла. Проверьте настройки браузера";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      toast.error("Ошибка при создании документа", {
+        description: errorMessage
+      });
       console.error("Error generating document:", error);
     }
   };

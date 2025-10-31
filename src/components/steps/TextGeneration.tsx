@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import { Card } from "@/components/ui/card";
 import { Check, Loader2, AlertCircle } from "lucide-react";
-import { generateSectionContent } from "@/lib/gigachat";
+import { generateSectionContent, GigaChatError } from "@/lib/gigachat";
 import { toast } from "sonner";
 
 interface Section {
@@ -59,7 +59,19 @@ export const TextGeneration = ({ sections, theme, onComplete }: TextGenerationPr
           });
         } catch (error) {
           console.error(`Error generating content for section ${i + 1}:`, error);
-          toast.error(`Ошибка при генерации раздела: ${sections[i].title}`);
+          
+          // Выводим понятные сообщения об ошибках
+          if (error instanceof GigaChatError) {
+            toast.error(`Ошибка: ${error.message}`, {
+              description: error.code === 'NO_CREDENTIALS' 
+                ? 'Настройте API ключи в .env файле'
+                : error.code === 'NETWORK_ERROR'
+                ? 'Проверьте подключение к интернету'
+                : undefined
+            });
+          } else {
+            toast.error(`Ошибка при генерации раздела: ${sections[i].title}`);
+          }
           
           // Use mock content as fallback
           sectionsWithContent.push({

@@ -15,4 +15,21 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Отделяем большие библиотеки UI
+          'radix-ui': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-select'],
+          // Отделяем UI библиотеку
+          'lucide-react': ['lucide-react'],
+          // Отделяем библиотеки для работы с данными
+          'query': ['@tanstack/react-query'],
+          // Отделяем библиотеки для документов
+          'docx': ['docx', 'file-saver'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 1000, // Увеличиваем лимит предупреждений
+  },
 }));
