@@ -167,6 +167,29 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
         );
       }
 
+      // Prepare table of contents
+      const tableOfContents: Paragraph[] = [
+        new Paragraph({
+          text: "Содержание",
+          heading: HeadingLevel.HEADING_1,
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 800, after: 400 },
+        })
+      ];
+
+      sections.forEach((section, index) => {
+        tableOfContents.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: `${index + 1}. ${section.title}`,
+              }),
+            ],
+            spacing: { after: 200 },
+          })
+        );
+      });
+
       // Prepare document sections
       const documentSections: Paragraph[] = [];
 
@@ -224,6 +247,19 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
             children: [
               // Title page
               ...titlePageContent,
+            ],
+          },
+          {
+            properties: {
+              type: SectionType.NEXT_PAGE,
+            },
+            children: [
+              // Table of contents
+              ...tableOfContents,
+            ],
+          },
+          {
+            children: [
               // Content sections
               ...documentSections,
             ],

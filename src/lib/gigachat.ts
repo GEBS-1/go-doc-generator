@@ -329,7 +329,8 @@ export type DocumentType = keyof typeof documentTypes;
  */
 export async function generateDocumentStructure(
   theme: string,
-  docType: DocumentType
+  docType: DocumentType,
+  sourceMaterials?: string
 ): Promise<Array<{
   title: string;
   description: string;
@@ -338,7 +339,17 @@ export async function generateDocumentStructure(
 }>> {
   const docTypeInfo = documentTypes[docType];
   
-  const prompt = `Создай детальную структуру ${docTypeInfo.name.toLowerCase()} на тему: "${theme}"
+  let materialsPrompt = "";
+  if (sourceMaterials && sourceMaterials.trim()) {
+    materialsPrompt = `
+
+Исходные материалы и данные:
+${sourceMaterials}
+
+Учти эти материалы при формировании структуры документа.`;
+  }
+  
+  const prompt = `Создай детальную структуру ${docTypeInfo.name.toLowerCase()} на тему: "${theme}"${materialsPrompt}
 
 Требования к структуре:
 - Количество разделов: ${docTypeInfo.minSections}-${docTypeInfo.maxSections}
@@ -432,10 +443,30 @@ export async function generateSectionContent(
 
 Напиши развернутый текст на 300-400 слов. Используй академический стиль. Структурируй текст на абзацы.`;
 
-  const systemPrompt = `Ты - опытный писатель академических текстов. Пиши четко, профессионально и структурированно.`;
+  const systemPrompt = `Ты - опытный писатель академических текстов. Пиши четко, профессионально и структурированно. Избегай шаблонных фраз, используй разнообразие в формулировках.`;
 
   const content = await generateTextWithGigaChat(prompt, systemPrompt);
   return content;
+}
+
+/**
+ * Очеловечивает текст - делает его более естественным и менее похожим на AI-сгенерированный
+ */
+export async function humanizeText(text: string): Promise<string> {
+  const prompt = `Переформулируй следующий текст, сделав его более естественным и "человеческим". 
+Сохрани смысл и академический стиль, но:
+- Разнообразь формулировки
+- Избегай шаблонных AI-фраз
+- Добавь немного вариативности в построение предложений
+- Сделай текст похожим на написанный человеком
+
+Текст для обработки:
+${text}`;
+
+  const systemPrompt = `Ты - опытный редактор академических текстов. Твоя задача - улучшить стиль текста, сохранив смысл.`;
+
+  const humanized = await generateTextWithGigaChat(prompt, systemPrompt);
+  return humanized;
 }
 
 // Экспортируем класс ошибки для использования в других модулях

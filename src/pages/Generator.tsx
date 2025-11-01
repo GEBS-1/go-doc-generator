@@ -30,11 +30,13 @@ const Generator = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [theme, setTheme] = useState("");
   const [docType, setDocType] = useState<DocumentType>("courseWork");
+  const [sourceMaterials, setSourceMaterials] = useState<string>("");
   const [sections, setSections] = useState<Section[]>([]);
 
-  const handleThemeNext = (newTheme: string, newDocType: DocumentType) => {
+  const handleThemeNext = (newTheme: string, newDocType: DocumentType, materials?: string) => {
     setTheme(newTheme);
     setDocType(newDocType);
+    setSourceMaterials(materials || "");
     setCurrentStep(2);
   };
 
@@ -68,6 +70,7 @@ const Generator = () => {
               <StructureEditor
                 theme={theme}
                 docType={docType}
+                sourceMaterials={sourceMaterials}
                 onNext={handleStructureNext}
                 onBack={() => setCurrentStep(1)}
               />

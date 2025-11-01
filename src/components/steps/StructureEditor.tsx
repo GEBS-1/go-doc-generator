@@ -20,11 +20,12 @@ interface Section {
 interface StructureEditorProps {
   theme: string;
   docType: DocumentType;
+  sourceMaterials?: string;
   onNext: (sections: Section[]) => void;
   onBack: () => void;
 }
 
-export const StructureEditor = ({ theme, docType, onNext, onBack }: StructureEditorProps) => {
+export const StructureEditor = ({ theme, docType, sourceMaterials, onNext, onBack }: StructureEditorProps) => {
   const [sections, setSections] = useState<Section[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -45,12 +46,12 @@ export const StructureEditor = ({ theme, docType, onNext, onBack }: StructureEdi
       // Генерируем через AI
       generateStructure();
     }
-  }, [theme, docType]);
+  }, [theme, docType, sourceMaterials]);
 
   const generateStructure = async () => {
     setIsGenerating(true);
     try {
-      const generatedStructure = await generateDocumentStructure(theme, docType);
+      const generatedStructure = await generateDocumentStructure(theme, docType, sourceMaterials);
       
       // Преобразуем в нужный формат
       const formattedSections: Section[] = generatedStructure.map((section, index) => ({
@@ -180,6 +181,12 @@ export const StructureEditor = ({ theme, docType, onNext, onBack }: StructureEdi
 
   const totalChars = sections.reduce((sum, s) => sum + (s.estimatedChars || 0), 0);
   const docTypeInfo = documentTypes[docType];
+  
+  // Проверка соответствия требованиям
+  const sectionsCount = sections.length;
+  const sectionsOK = sectionsCount >= docTypeInfo.minSections && sectionsCount <= docTypeInfo.maxSections;
+  const volumeOK = totalChars > 0 ? Math.abs(totalChars - docTypeInfo.targetChars) / docTypeInfo.targetChars < 0.3 : true;
+  const volumePercent = totalChars > 0 ? Math.round((totalChars / docTypeInfo.targetChars) * 100) : 0;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -201,6 +208,40 @@ export const StructureEditor = ({ theme, docType, onNext, onBack }: StructureEdi
             </span>
           )}
         </div>
+        
+        {/* Индикатор соответствия требованиям */}
+        {totalChars > 0 && (
+          <div className="mt-4 p-4 rounded-lg bg-secondary/50 border border-border">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-semibold">Соответствие требованиям</span>
+              <div className="flex items-center gap-2">
+                {sectionsOK && volumeOK ? (
+                  <Badge variant="default" className="bg-success text-success-foreground">
+                    ✓ Соответствует
+                  </Badge>
+                ) : (
+                  <Badge variant="default" className="bg-warning text-warning-foreground">
+                    ⚠ Требует внимания
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span>Количество разделов: {sectionsCount}</span>
+                <span className={sectionsOK ? "text-success" : "text-warning"}>
+                  {sectionsOK ? "✓" : "⚠"} Требуется: {docTypeInfo.minSections}-{docTypeInfo.maxSections}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Объём текста: {totalChars.toLocaleString('ru-RU')} символов</span>
+                <span className={volumeOK ? "text-success" : "text-warning"}>
+                  {volumeOK ? "✓" : "⚠"} Целевой: {docTypeInfo.targetChars.toLocaleString('ru-RU')} ({volumePercent}%)
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {isGenerating && (

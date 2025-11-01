@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -9,12 +10,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Lightbulb, BookOpen, FileText, GraduationCap, Newspaper, FileCheck } from "lucide-react";
+import { Sparkles, Lightbulb, BookOpen, FileText, GraduationCap, Newspaper, FileCheck, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { DocumentType, documentTypes } from "@/lib/gigachat";
 
 interface ThemeInputProps {
-  onNext: (theme: string, docType: DocumentType) => void;
+  onNext: (theme: string, docType: DocumentType, sourceMaterials?: string) => void;
 }
 
 const exampleThemes = [
@@ -38,6 +39,8 @@ const getDocumentTypeIcon = (type: DocumentType) => {
 export const ThemeInput = ({ onNext }: ThemeInputProps) => {
   const [theme, setTheme] = useState("");
   const [docType, setDocType] = useState<DocumentType>("courseWork");
+  const [sourceMaterials, setSourceMaterials] = useState("");
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,11 +57,24 @@ export const ThemeInput = ({ onNext }: ThemeInputProps) => {
     
     const docTypeInfo = documentTypes[docType];
     toast.success(`Генерируем структуру ${docTypeInfo.name.toLowerCase()}...`);
-    onNext(theme, docType);
+    onNext(theme, docType, sourceMaterials);
   };
 
   const handleExampleClick = (example: string) => {
     setTheme(example);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    
+    const newFiles = Array.from(files);
+    setUploadedFiles(prev => [...prev, ...newFiles]);
+    toast.success(`Загружено файлов: ${newFiles.length}`);
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   return (
@@ -120,6 +136,21 @@ export const ThemeInput = ({ onNext }: ThemeInputProps) => {
           />
           <p className="text-sm text-muted-foreground">
             Чем подробнее опишете тему, тем точнее будет структура документа
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <Label className="text-base font-semibold">
+            Исходные материалы (опционально)
+          </Label>
+          <Textarea
+            placeholder="Добавьте дополнительные данные: результаты исследований, исходный код, требования, ссылки на источники и т.д."
+            value={sourceMaterials}
+            onChange={(e) => setSourceMaterials(e.target.value)}
+            rows={4}
+          />
+          <p className="text-sm text-muted-foreground">
+            AI будет использовать эти данные при генерации структуры и текста
           </p>
         </div>
 
