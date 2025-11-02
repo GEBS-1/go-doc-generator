@@ -36,12 +36,6 @@ interface TokenResponse {
   expires_at: string;
 }
 
-interface GigaChatError {
-  code: string;
-  message: string;
-  details?: unknown;
-}
-
 // Кэш для токена
 let cachedToken: TokenResponse | null = null;
 
