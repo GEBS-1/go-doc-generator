@@ -43,6 +43,16 @@ let cachedToken: TokenResponse | null = null;
 const OAUTH_TIMEOUT = 10000; // 10 секунд для OAuth
 const API_TIMEOUT = 60000; // 60 секунд для API запросов
 
+// Базовые URL для API (используем proxy в development для решения CORS)
+const isDevelopment = import.meta.env.DEV;
+const GIGACHAT_OAUTH_URL = isDevelopment 
+  ? '/api/gigachat-oauth/api/v2/oauth'  // Через Vite proxy
+  : 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth';  // Прямой вызов (нужен backend proxy в production)
+
+const GIGACHAT_API_URL = isDevelopment
+  ? '/api/gigachat-api/api/v1/chat/completions'  // Через Vite proxy
+  : 'https://gigachat.devices.sberbank.ru/api/v1/chat/completions';
+
 /**
  * Создаёт fetch с таймаутом
  */
@@ -122,7 +132,7 @@ async function getAccessToken(): Promise<string> {
     const rqUID = crypto.randomUUID();
 
     const response = await fetchWithTimeout(
-      'https://ngw.devices.sberbank.ru:9443/api/v2/oauth',
+      GIGACHAT_OAUTH_URL,
       {
         method: 'POST',
         headers: {
@@ -172,9 +182,9 @@ async function getAccessToken(): Promise<string> {
     }
     
     if (error instanceof Error) {
-      // Проверяем на сетевые ошибки
-      if (error.message.includes('fetch')) {
-        throw new GigaChatError('NETWORK_ERROR', 'Ошибка сети. Проверьте подключение к интернету');
+      // Проверяем на сетевые ошибки и CORS
+      if (error.message.includes('fetch') || error.message.includes('CORS') || error.message.includes('Failed to fetch')) {
+        throw new GigaChatError('NETWORK_ERROR', 'Ошибка сети. Проверьте подключение к интернету или перезапустите dev server для применения proxy настроек');
       }
       throw new GigaChatError('UNKNOWN_ERROR', `Неожиданная ошибка: ${error.message}`, error);
     }
@@ -215,7 +225,7 @@ export async function generateTextWithGigaChat(
     const accessToken = await getAccessToken();
 
     const response = await fetchWithTimeout(
-      'https://gigachat.devices.sberbank.ru/api/v1/chat/completions',
+      GIGACHAT_API_URL,
       {
         method: 'POST',
         headers: {
