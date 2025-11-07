@@ -9,29 +9,19 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 8080,
     proxy: {
-      // Proxy для GigaChat OAuth (решает проблему CORS в development)
+      // Vite proxy - это встроенная функция, не отдельный сервер!
+      // Работает внутри Vite dev сервера и решает проблему CORS
       '/api/gigachat-oauth': {
         target: 'https://ngw.devices.sberbank.ru:9443',
         changeOrigin: true,
-        secure: true,
+        secure: false, // Отключаем проверку SSL для development
         rewrite: (path) => path.replace(/^\/api\/gigachat-oauth/, ''),
-        configure: (proxy, _options) => {
-          proxy.on('error', (err, _req, res) => {
-            console.log('Proxy error (OAuth):', err);
-          });
-        },
       },
-      // Proxy для GigaChat API (решает проблему CORS в development)
       '/api/gigachat-api': {
         target: 'https://gigachat.devices.sberbank.ru',
         changeOrigin: true,
-        secure: true,
+        secure: false, // Отключаем проверку SSL для development
         rewrite: (path) => path.replace(/^\/api\/gigachat-api/, ''),
-        configure: (proxy, _options) => {
-          proxy.on('error', (err, _req, res) => {
-            console.log('Proxy error (API):', err);
-          });
-        },
       },
     },
   },

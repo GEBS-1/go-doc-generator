@@ -7,7 +7,7 @@ import { StructureEditor } from "@/components/steps/StructureEditor";
 import { TextGeneration } from "@/components/steps/TextGeneration";
 import { DocumentEditor } from "@/components/steps/DocumentEditor";
 import { TitlePage } from "@/components/steps/TitlePage";
-import { DocumentType } from "@/lib/gigachat";
+import { DocumentType, TableData, ChartData } from "@/lib/gigachat";
 
 interface Section {
   id: string;
@@ -16,6 +16,8 @@ interface Section {
   content?: string;
   estimatedChars?: number;
   subsections?: string[];
+  tables?: TableData[];
+  charts?: ChartData[];
 }
 
 const steps = [
@@ -87,6 +89,7 @@ const Generator = () => {
             {currentStep === 4 && (
               <DocumentEditor
                 sections={sections}
+                theme={theme}
                 onNext={handleEditorNext}
                 onBack={() => setCurrentStep(2)}
               />

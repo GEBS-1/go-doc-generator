@@ -35,17 +35,27 @@ export const StructureEditor = ({ theme, docType, sourceMaterials, onNext, onBac
 
   // Автоматически генерируем структуру при загрузке
   useEffect(() => {
-    const apiKey = import.meta.env.VITE_GIGACHAT_CLIENT_ID;
-    const apiSecret = import.meta.env.VITE_GIGACHAT_CLIENT_SECRET;
-    setHasApiKey(!!(apiKey && apiSecret));
+    // Проверяем наличие API ключей
+    const authKey = import.meta.env.VITE_GIGACHAT_AUTH_KEY;
+    const clientId = import.meta.env.VITE_GIGACHAT_CLIENT_ID;
+    const clientSecret = import.meta.env.VITE_GIGACHAT_CLIENT_SECRET;
+    const hasApiCredentials = !!(authKey || (clientId && clientSecret));
     
-    if (!hasApiKey) {
-      // Используем дефолтную структуру если нет API ключа
-      setSections(getDefaultStructure(docType));
-    } else {
-      // Генерируем через AI
-      generateStructure();
+    console.group('🔍 StructureEditor: API Keys Check');
+    console.log('Has API credentials:', hasApiCredentials);
+    if (!hasApiCredentials) {
+      console.warn('⚠️ No API keys found - will use default structure');
     }
+    console.groupEnd();
+    
+    setHasApiKey(hasApiCredentials);
+    
+    if (!hasApiCredentials) {
+      setSections(getDefaultStructure(docType));
+      return;
+    }
+
+    generateStructure();
   }, [theme, docType, sourceMaterials]);
 
   const generateStructure = async () => {

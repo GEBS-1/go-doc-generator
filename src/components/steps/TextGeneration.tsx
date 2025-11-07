@@ -25,9 +25,31 @@ export const TextGeneration = ({ sections, theme, onComplete }: TextGenerationPr
   const [hasApiKey, setHasApiKey] = useState(true);
 
   useEffect(() => {
+    const authKey = import.meta.env.VITE_GIGACHAT_AUTH_KEY;
     const clientId = import.meta.env.VITE_GIGACHAT_CLIENT_ID;
     const clientSecret = import.meta.env.VITE_GIGACHAT_CLIENT_SECRET;
-    setHasApiKey(!!(clientId && clientSecret));
+    
+    // Подробное логирование для диагностики
+    console.group('🔍 TextGeneration: Checking API Keys');
+    console.log('VITE_GIGACHAT_AUTH_KEY:', authKey ? `✓ Found (${authKey.substring(0, 15)}...)` : '✗ Not found');
+    console.log('VITE_GIGACHAT_CLIENT_ID:', clientId ? `✓ Found (${clientId.substring(0, 15)}...)` : '✗ Not found');
+    console.log('VITE_GIGACHAT_CLIENT_SECRET:', clientSecret ? '✓ Found' : '✗ Not found');
+    
+    // Проверяем наличие хотя бы одного метода авторизации
+    const hasKeys = !!(authKey || (clientId && clientSecret));
+    console.log('Has API Keys:', hasKeys ? '✅ YES' : '❌ NO');
+    
+    if (!hasKeys) {
+      console.warn('⚠️ API keys not found! Using demo mode.');
+      console.warn('Please create .env file in project root with:');
+      console.warn('  VITE_GIGACHAT_AUTH_KEY=your_authorization_key');
+      console.warn('  OR');
+      console.warn('  VITE_GIGACHAT_CLIENT_ID=your_client_id');
+      console.warn('  VITE_GIGACHAT_CLIENT_SECRET=your_client_secret');
+    }
+    console.groupEnd();
+    
+    setHasApiKey(hasKeys);
 
     const generateContent = async () => {
       const sectionsWithContent: Section[] = [];
@@ -39,7 +61,7 @@ export const TextGeneration = ({ sections, theme, onComplete }: TextGenerationPr
         try {
           let content: string;
           
-          if (clientId && clientSecret) {
+          if (authKey || (clientId && clientSecret)) {
             // Real AI generation
             content = await generateSectionContent(
               sections[i].title,
@@ -64,13 +86,13 @@ export const TextGeneration = ({ sections, theme, onComplete }: TextGenerationPr
           if (error instanceof GigaChatError) {
             toast.error(`Ошибка: ${error.message}`, {
               description: error.code === 'NO_CREDENTIALS' 
-                ? 'Настройте API ключи в .env файле'
+                ? 'Настройте API ключи в .env файле (VITE_GIGACHAT_AUTH_KEY или VITE_GIGACHAT_CLIENT_ID + SECRET)'
                 : error.code === 'NETWORK_ERROR'
                 ? 'Проверьте подключение к интернету'
                 : undefined
             });
           } else {
-            toast.error(`Ошибка при генерации раздела: ${sections[i].title}`);
+            toast.error(`Ошибка при генерации раздела: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
           }
           
           // Use mock content as fallback
