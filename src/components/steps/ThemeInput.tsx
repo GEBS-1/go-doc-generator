@@ -42,12 +42,13 @@ export const ThemeInput = ({ onNext }: ThemeInputProps) => {
   const [docType, setDocType] = useState<DocumentType>("courseWork");
   const [sourceMaterials, setSourceMaterials] = useState("");
   const { isAuthenticated, promptLogin } = useAuth();
+  const authRequired = import.meta.env.VITE_REQUIRE_AUTH !== "false";
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!isAuthenticated) {
-      toast.info("Пожалуйста, войдите через Telegram или Google, чтобы продолжить");
+    if (authRequired && !isAuthenticated) {
+      toast.info("Пожалуйста, войдите через Telegram, чтобы продолжить");
       promptLogin();
       return;
     }

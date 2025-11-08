@@ -4,15 +4,14 @@ const axios = require('axios');
 const cors = require('cors');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
-const fetch = require('node-fetch');
 const { YooCheckout } = require('@a2seven/yoo-checkout');
+const { run: dbRun, get: dbGet } = require('./db');
 
 const app = express();
 
 const {
   AUTH_JWT_SECRET,
   TELEGRAM_BOT_TOKEN,
-  GOOGLE_CLIENT_ID,
   YOOKASSA_SHOP_ID,
   YOOKASSA_SECRET_KEY,
   PAYMENT_RETURN_URL,
@@ -26,10 +25,6 @@ if (!AUTH_JWT_SECRET) {
 
 if (!TELEGRAM_BOT_TOKEN) {
   console.warn('[Auth] TELEGRAM_BOT_TOKEN не задан. Telegram авторизация не будет работать.');
-}
-
-if (!GOOGLE_CLIENT_ID) {
-  console.warn('[Auth] GOOGLE_CLIENT_ID не задан. Google авторизация не будет работать.');
 }
 
 if (!YOOKASSA_SHOP_ID || !YOOKASSA_SECRET_KEY) {
@@ -107,57 +102,223 @@ const SUBSCRIPTION_PLANS = {
   },
 };
 
-const users = new Map();
-
 const PAYMENT_SUCCESS_URL = PAYMENT_RETURN_URL || `${DEFAULT_FRONTEND_ORIGIN}/payment/success`;
 const PAYMENT_FAIL_URL = process.env.PAYMENT_FAIL_URL || `${DEFAULT_FRONTEND_ORIGIN}/payment/failed`;
 
 const AUTH_TOKEN_TTL = process.env.AUTH_TOKEN_TTL || '7d';
+
+const planMeta = (planId) => SUBSCRIPTION_PLANS[planId] || null;
+
+const calculateNextResetDate = (from = new Date()) => {
+  const date = new Date(from);
+  date.setMonth(date.getMonth() + 1);
+  date.setDate(1);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const addMonths = (from, months) => {
+  const date = new Date(from);
+  date.setMonth(date.getMonth() + months);
+  return date;
+};
+
+const mapSubscriptionInfo = (subscription) => {
+  if (!subscription) {
+    return null;
+  }
+
+  const meta = planMeta(subscription.plan);
+  return {
+    planId: subscription.plan,
+    planName: meta?.name || subscription.plan,
+    status: subscription.status,
+    activatedAt: subscription.activatedAt,
+    expiresAt: subscription.expiresAt,
+    documentsLimit: subscription.docsLimit,
+    type: meta?.type || null,
+  };
+};
+
+const mapSubscriptionUsage = (subscription) => {
+  if (!subscription) {
+    return null;
+  }
+
+  const meta = planMeta(subscription.plan);
+  return {
+    planId: subscription.plan,
+    planName: meta?.name || subscription.plan,
+    type: meta?.type || null,
+    status: subscription.status,
+    docsGenerated: subscription.docsGenerated,
+    docsLimit: subscription.docsLimit,
+    resetDate: subscription.resetDate,
+    activatedAt: subscription.activatedAt,
+    expiresAt: subscription.expiresAt,
+  };
+};
+
+const normalizeUserRow = (row) => {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    telegramId: row.telegram_id,
+    username: row.username,
+    firstName: row.first_name,
+    photoUrl: row.photo_url,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};
+
+const normalizeSubscriptionRow = (row) => {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    userId: row.user_id,
+    plan: row.plan,
+    status: row.status,
+    docsGenerated: row.docs_generated,
+    docsLimit: row.docs_limit,
+    resetDate: row.reset_date ? new Date(row.reset_date) : null,
+    activatedAt: row.activated_at ? new Date(row.activated_at) : null,
+    expiresAt: row.expires_at ? new Date(row.expires_at) : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};
 
 const sanitizeUser = (user) => {
   if (!user) {
     return null;
   }
 
-  const {
-    id,
-    name,
-    email,
-    avatarUrl,
-    provider,
-    username,
-    telegram,
-    subscription,
-  } = user;
+  const displayName = user.firstName || user.username || 'Пользователь Telegram';
 
   return {
-    id,
-    name,
-    email: email || null,
-    avatarUrl: avatarUrl || null,
-    provider,
-    username: username || null,
-    telegram: telegram
+    id: user.id,
+    name: displayName,
+    email: null,
+    avatarUrl: user.photoUrl || null,
+    provider: 'telegram',
+    username: user.username || null,
+    telegram: user.telegramId
       ? {
-          id: telegram.id,
-          username: telegram.username,
+          id: Number(user.telegramId),
+          username: user.username || null,
         }
       : null,
-    subscription: subscription || null,
+    subscription: mapSubscriptionInfo(user.subscription),
   };
 };
 
-const upsertUser = (id, data) => {
-  const existing = users.get(id) || {};
-  const updated = {
-    ...existing,
-    id,
-    ...data,
-    updatedAt: new Date().toISOString(),
-    createdAt: existing.createdAt || new Date().toISOString(),
+const fetchUserWithSubscription = async (userId) => {
+  if (userId == null) {
+    return null;
+  }
+
+  const numericId = typeof userId === 'string' ? Number(userId) : userId;
+  if (Number.isNaN(numericId)) {
+    return null;
+  }
+
+  const userRow = await dbGet('SELECT * FROM users WHERE id = ?', [numericId]);
+  if (!userRow) {
+    return null;
+  }
+
+  const user = normalizeUserRow(userRow);
+  let subscriptionRow = await dbGet('SELECT * FROM subscriptions WHERE user_id = ?', [user.id]);
+  let subscription = normalizeSubscriptionRow(subscriptionRow);
+
+  if (subscription && subscription.resetDate && subscription.resetDate <= new Date()) {
+    const meta = planMeta(subscription.plan);
+    const nextReset = calculateNextResetDate().toISOString();
+    const docsLimit =
+      meta && meta.documentsLimit != null && meta.type !== 'one-time'
+        ? meta.documentsLimit
+        : subscription.docsLimit;
+
+    await dbRun(
+      `UPDATE subscriptions
+       SET docs_generated = 0,
+           reset_date = ?,
+           docs_limit = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [nextReset, docsLimit, subscription.id],
+    );
+
+    subscriptionRow = await dbGet('SELECT * FROM subscriptions WHERE id = ?', [subscription.id]);
+    subscription = normalizeSubscriptionRow(subscriptionRow);
+  }
+
+  return {
+    ...user,
+    subscription,
   };
-  users.set(id, updated);
-  return updated;
+};
+
+const ensureFreeSubscription = async (user) => {
+  if (user.subscription) {
+    return user;
+  }
+
+  const meta = planMeta('free');
+  if (!meta) {
+    throw new Error('Базовый тариф free не сконфигурирован');
+  }
+
+  const now = new Date();
+  await dbRun(
+    `INSERT INTO subscriptions (
+      user_id, plan, status, docs_generated, docs_limit, activated_at, reset_date, updated_at
+    ) VALUES (?, ?, 'active', 0, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    [user.id, meta.id, meta.documentsLimit, now.toISOString(), calculateNextResetDate(now).toISOString()],
+  );
+
+  const subscriptionRow = await dbGet('SELECT * FROM subscriptions WHERE user_id = ?', [user.id]);
+  return {
+    ...user,
+    subscription: normalizeSubscriptionRow(subscriptionRow),
+  };
+};
+
+const upsertTelegramUser = async (data) => {
+  const telegramId = Number(data.id);
+  const fullName = [data.first_name, data.last_name].filter(Boolean).join(' ') || null;
+  const username = data.username || null;
+  const photoUrl = data.photo_url || null;
+
+  const existing = await dbGet('SELECT * FROM users WHERE telegram_id = ?', [telegramId]);
+
+  if (existing) {
+    await dbRun(
+      `UPDATE users
+       SET username = ?, first_name = ?, photo_url = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [username, fullName, photoUrl, existing.id],
+    );
+    const user = await fetchUserWithSubscription(existing.id);
+    const ensured = await ensureFreeSubscription(user);
+    return sanitizeUser(ensured);
+  }
+
+  const insertResult = await dbRun(
+    'INSERT INTO users (telegram_id, username, first_name, photo_url) VALUES (?, ?, ?, ?)',
+    [telegramId, username, fullName, photoUrl],
+  );
+
+  const user = await fetchUserWithSubscription(insertResult.lastID);
+  const ensured = await ensureFreeSubscription(user);
+  return sanitizeUser(ensured);
 };
 
 const createToken = (payload = {}) => {
@@ -175,7 +336,7 @@ const verifyToken = (token) => {
   return jwt.verify(token, AUTH_JWT_SECRET);
 };
 
-const requireAuth = (req, res, next) => {
+const requireAuth = async (req, res, next) => {
   try {
     const header = req.headers.authorization || '';
     const parts = header.split(' ');
@@ -187,7 +348,8 @@ const requireAuth = (req, res, next) => {
 
     const token = parts[1];
     const decoded = verifyToken(token);
-    const user = users.get(decoded.sub);
+
+    const user = await fetchUserWithSubscription(decoded.sub);
 
     if (!user) {
       return res.status(401).json({
@@ -195,9 +357,14 @@ const requireAuth = (req, res, next) => {
       });
     }
 
-    req.user = decoded;
-    req.authUser = user;
-    next();
+    req.user = {
+      ...decoded,
+      sub: user.id,
+    };
+    req.authUser = sanitizeUser(user);
+    req.authUserRecord = user;
+
+    return next();
   } catch (error) {
     return res.status(401).json({
       error: 'Недействительный токен',
@@ -206,41 +373,117 @@ const requireAuth = (req, res, next) => {
   }
 };
 
-const applySubscription = (userId, planId) => {
-  const plan = SUBSCRIPTION_PLANS[planId];
-  if (!plan) {
+const applySubscription = async (userId, planId) => {
+  const meta = planMeta(planId);
+  if (!meta) {
     return null;
   }
 
-  const user = users.get(userId);
+  const user = await fetchUserWithSubscription(userId);
   if (!user) {
     return null;
   }
 
-  const now = Date.now();
-  let expiresAt = null;
+  const now = new Date();
+  const nowISO = now.toISOString();
+  const nextResetISO = calculateNextResetDate(now).toISOString();
 
-  if (plan.type === 'subscription' && plan.period === 'monthly') {
-    const nextMonth = new Date(now);
-    nextMonth.setMonth(nextMonth.getMonth() + 1);
-    expiresAt = nextMonth.toISOString();
+  if (meta.type === 'one-time') {
+    const docsIncrease = meta.documentsLimit || 0;
+
+    if (user.subscription) {
+      await dbRun(
+        `UPDATE subscriptions
+         SET docs_limit = COALESCE(docs_limit, 0) + ?,
+             status = 'active',
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [docsIncrease, user.subscription.id],
+      );
+    } else {
+      await dbRun(
+        `INSERT INTO subscriptions (
+          user_id, plan, status, docs_generated, docs_limit, activated_at, reset_date, updated_at
+        ) VALUES (?, ?, 'active', 0, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [user.id, meta.id, docsIncrease, nowISO, nextResetISO],
+      );
+    }
+  } else {
+    const expiresAt =
+      meta.type === 'subscription' && meta.period === 'monthly'
+        ? addMonths(now, 1).toISOString()
+        : null;
+
+    if (user.subscription) {
+      await dbRun(
+        `UPDATE subscriptions
+         SET plan = ?, status = 'active', docs_generated = 0, docs_limit = ?, activated_at = ?, reset_date = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [meta.id, meta.documentsLimit, nowISO, nextResetISO, expiresAt, user.subscription.id],
+      );
+    } else {
+      await dbRun(
+        `INSERT INTO subscriptions (
+          user_id, plan, status, docs_generated, docs_limit, activated_at, reset_date, expires_at, updated_at
+        ) VALUES (?, ?, 'active', 0, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [user.id, meta.id, meta.documentsLimit, nowISO, nextResetISO, expiresAt],
+      );
+    }
   }
 
-  const subscription = {
-    planId: plan.id,
-    planName: plan.name,
-    status: 'active',
-    activatedAt: new Date(now).toISOString(),
-    expiresAt,
-    documentsLimit: plan.documentsLimit,
-    type: plan.type,
+  const refreshedUser = await fetchUserWithSubscription(user.id);
+  return sanitizeUser(refreshedUser);
+};
+
+const subscriptionAllowsDocument = (subscription) => {
+  if (!subscription) {
+    return false;
+  }
+  if (subscription.docsLimit == null) {
+    return true;
+  }
+  return subscription.docsGenerated < subscription.docsLimit;
+};
+
+const evaluateDocumentQuota = async (userId, { consume = false } = {}) => {
+  const user = await fetchUserWithSubscription(userId);
+
+  if (!user || !user.subscription) {
+    return {
+      allowed: false,
+      reason: 'no_subscription',
+      subscription: null,
+    };
+  }
+
+  if (!subscriptionAllowsDocument(user.subscription)) {
+    return {
+      allowed: false,
+      reason: 'limit_exceeded',
+      subscription: mapSubscriptionUsage(user.subscription),
+    };
+  }
+
+  if (!consume) {
+    return {
+      allowed: true,
+      subscription: mapSubscriptionUsage(user.subscription),
+    };
+  }
+
+  await dbRun(
+    `UPDATE subscriptions
+     SET docs_generated = docs_generated + 1,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [user.subscription.id],
+  );
+
+  const updatedRow = await dbGet('SELECT * FROM subscriptions WHERE id = ?', [user.subscription.id]);
+  return {
+    allowed: true,
+    subscription: mapSubscriptionUsage(normalizeSubscriptionRow(updatedRow)),
   };
-
-  const updated = upsertUser(userId, {
-    subscription,
-  });
-
-  return sanitizeUser(updated);
 };
 
 // Middleware
@@ -260,7 +503,7 @@ app.get('/api/plans', (req, res) => {
   });
 });
 
-app.post('/api/auth/telegram', (req, res) => {
+app.post('/api/auth/telegram', async (req, res) => {
   try {
     if (!TELEGRAM_BOT_TOKEN) {
       return res.status(503).json({
@@ -298,31 +541,16 @@ app.post('/api/auth/telegram', (req, res) => {
       });
     }
 
-    const userId = `telegram:${data.id}`;
-    const name =
-      [data.first_name, data.last_name].filter(Boolean).join(' ') ||
-      data.username ||
-      'Пользователь Telegram';
-
-    const user = upsertUser(userId, {
-      provider: 'telegram',
-      name,
-      username: data.username || null,
-      avatarUrl: data.photo_url || null,
-      telegram: {
-        id: data.id,
-        username: data.username || null,
-      },
-    });
+    const user = await upsertTelegramUser(data);
 
     const token = createToken({
-      sub: userId,
+      sub: user.id,
       provider: 'telegram',
     });
 
     res.json({
       token,
-      user: sanitizeUser(user),
+      user,
     });
   } catch (error) {
     console.error('Telegram auth error:', error);
@@ -333,80 +561,46 @@ app.post('/api/auth/telegram', (req, res) => {
   }
 });
 
-app.post('/api/auth/google', async (req, res) => {
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({
+    user: req.authUser,
+  });
+});
+
+app.get('/api/subscription', requireAuth, async (req, res) => {
+  const detailed = req.authUserRecord
+    ? mapSubscriptionUsage(req.authUserRecord.subscription)
+    : null;
+
+  res.json({
+    subscription: detailed,
+  });
+});
+
+app.post('/api/subscription/consume', requireAuth, async (req, res) => {
   try {
-    if (!GOOGLE_CLIENT_ID) {
-      return res.status(503).json({
-        error: 'Google авторизация временно недоступна',
+    const { consume = true } = req.body || {};
+
+    const result = await evaluateDocumentQuota(req.user.sub, { consume });
+
+    if (!result.allowed) {
+      return res.status(403).json({
+        error: result.reason,
+        subscription: result.subscription,
       });
     }
-
-    const { credential } = req.body || {};
-
-    if (!credential) {
-      return res.status(400).json({
-        error: 'Отсутствует credential из Google',
-      });
-    }
-
-    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
-
-    if (!response.ok) {
-      return res.status(401).json({
-        error: 'Недействительный токен Google',
-      });
-    }
-
-    const payload = await response.json();
-
-    if (payload.aud !== GOOGLE_CLIENT_ID) {
-      return res.status(401).json({
-        error: 'Токен выдан для другого приложения Google',
-      });
-    }
-
-    const userId = `google:${payload.sub}`;
-    const name = payload.name || payload.email || 'Google user';
-
-    const user = upsertUser(userId, {
-      provider: 'google',
-      name,
-      email: payload.email || null,
-      avatarUrl: payload.picture || null,
-      emailVerified:
-        payload.email_verified === true ||
-        payload.email_verified === 'true' ||
-        payload.email_verified === 1,
-    });
-
-    const token = createToken({
-      sub: userId,
-      provider: 'google',
-    });
 
     res.json({
-      token,
-      user: sanitizeUser(user),
+      allowed: true,
+      subscription: result.subscription,
     });
   } catch (error) {
-    console.error('Google auth error:', error);
+    console.error('Subscription consume error:', error);
     res.status(500).json({
-      error: 'Ошибка авторизации через Google',
+      error: 'Не удалось обновить лимит документов',
       details: error.message,
     });
   }
-});
-
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json({
-    user: sanitizeUser(req.authUser),
-  });
-});
-
-app.get('/api/subscription', requireAuth, (req, res) => {
-  res.json({
-    subscription: req.authUser.subscription || null,
-  });
 });
 
 app.post('/api/payments/create', requireAuth, async (req, res) => {
@@ -420,8 +614,10 @@ app.post('/api/payments/create', requireAuth, async (req, res) => {
       });
     }
 
+    const userId = req.user.sub;
+
     if (plan.amount === 0) {
-      const user = applySubscription(req.user.sub, plan.id);
+      const user = await applySubscription(userId, plan.id);
       return res.json({
         status: 'activated',
         user,
@@ -455,6 +651,24 @@ app.post('/api/payments/create', requireAuth, async (req, res) => {
       idempotenceKey
     );
 
+    const metadataJson = payment.metadata ? JSON.stringify(payment.metadata) : null;
+    const status = payment.status || 'pending';
+
+    const updated = await dbRun(
+      `UPDATE payments
+       SET amount = ?, currency = ?, plan = ?, status = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE payment_id = ?`,
+      [plan.amount, plan.currency, plan.id, status, metadataJson, payment.id],
+    );
+
+    if (!updated.changes) {
+      await dbRun(
+        `INSERT INTO payments (user_id, payment_id, amount, currency, plan, status, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [userId, payment.id, plan.amount, plan.currency, plan.id, status, metadataJson],
+      );
+    }
+
     res.json({
       status: 'pending',
       paymentId: payment.id,
@@ -469,7 +683,7 @@ app.post('/api/payments/create', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/payments/webhook', (req, res) => {
+app.post('/api/payments/webhook', async (req, res) => {
   try {
     const event = req.body;
 
@@ -479,23 +693,65 @@ app.post('/api/payments/webhook', (req, res) => {
       });
     }
 
-    if (event.event === 'payment.succeeded') {
-      const metadata = event.object.metadata || {};
-      if (metadata.userId && metadata.planId) {
-        applySubscription(metadata.userId, metadata.planId);
-      }
+    const paymentObject = event.object;
+    const metadata = paymentObject.metadata || {};
+    const paymentId = paymentObject.id;
+    const status =
+      paymentObject.status ||
+      (event.event === 'payment.succeeded'
+        ? 'succeeded'
+        : event.event === 'payment.canceled'
+          ? 'canceled'
+          : 'pending');
+
+    const metadataJson = JSON.stringify(metadata || null);
+
+    const updateResult = await dbRun(
+      `UPDATE payments
+       SET status = ?, metadata = ?, amount = ?, currency = ?, plan = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE payment_id = ?`,
+      [
+        status,
+        metadataJson,
+        Number(paymentObject.amount?.value || 0),
+        paymentObject.amount?.currency || 'RUB',
+        metadata.planId || 'unknown',
+        paymentId,
+      ],
+    );
+
+    if (!updateResult.changes && metadata.userId) {
+      await dbRun(
+        `INSERT INTO payments (user_id, payment_id, amount, currency, plan, status, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          Number(metadata.userId),
+          paymentId,
+          Number(paymentObject.amount?.value || 0),
+          paymentObject.amount?.currency || 'RUB',
+          metadata.planId || 'unknown',
+          status,
+          metadataJson,
+        ],
+      );
+    } else if (!updateResult.changes) {
+      console.warn('Webhook без userId, невозможно создать запись платежа:', paymentId);
     }
 
-    if (event.event === 'payment.canceled') {
-      const metadata = event.object.metadata || {};
-      const user = users.get(metadata.userId);
-      if (user && user.subscription?.planId === metadata.planId) {
-        upsertUser(metadata.userId, {
-          subscription: {
-            ...user.subscription,
-            status: 'canceled',
-          },
-        });
+    if (event.event === 'payment.succeeded' && metadata.userId && metadata.planId) {
+      await applySubscription(Number(metadata.userId), metadata.planId);
+    }
+
+    if (event.event === 'payment.canceled' && metadata.userId) {
+      const userRecord = await fetchUserWithSubscription(Number(metadata.userId));
+      if (userRecord?.subscription) {
+        await dbRun(
+          `UPDATE subscriptions
+           SET status = 'canceled',
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [userRecord.subscription.id],
+        );
       }
     }
 

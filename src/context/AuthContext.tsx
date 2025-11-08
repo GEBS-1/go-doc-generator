@@ -37,7 +37,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
 
   const telegramBotName = import.meta.env.VITE_TELEGRAM_BOT_USERNAME;
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
   const applyAuthState = useCallback((auth: AuthResponse) => {
     setToken(auth.token);
@@ -125,18 +124,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     [authenticate],
   );
 
-  const handleGoogleCredential = useCallback(
-    async (credential: string) => {
-      if (!credential) {
-        toast.error("Google не вернул credential");
-        return;
-      }
-
-      await authenticate("/api/auth/google", { credential });
-    },
-    [authenticate],
-  );
-
   const logout = useCallback(() => {
     clearAuthState();
     toast.success("Вы вышли из аккаунта");
@@ -174,9 +161,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         onOpenChange={setAuthDialogOpen}
         loading={effectiveLoading}
         telegramBotName={telegramBotName}
-        googleClientId={googleClientId}
         onTelegramAuth={handleTelegramAuth}
-        onGoogleCredential={handleGoogleCredential}
       />
     </AuthContext.Provider>
   );

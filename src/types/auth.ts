@@ -1,4 +1,4 @@
-export type AuthProviderType = "telegram" | "google";
+export type AuthProviderType = "telegram";
 
 export interface SubscriptionInfo {
   planId: string;

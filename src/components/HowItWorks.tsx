@@ -4,7 +4,7 @@ const steps = [
   {
     icon: LogIn,
     title: "Авторизуйтесь",
-    description: "Войдите через Telegram или Google — создадим аккаунт и сохраним ваши шаблоны.",
+    description: "Войдите через Telegram — создадим аккаунт и сохраним ваши шаблоны.",
   },
   {
     icon: Settings,

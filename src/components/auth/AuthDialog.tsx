@@ -1,10 +1,8 @@
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Loader2, LogIn } from "lucide-react";
 import { TelegramLoginButton } from "./TelegramLoginButton";
-import { GoogleLoginButton } from "./GoogleLoginButton";
 import type { TelegramAuthPayload } from "@/types/auth";
 
 interface AuthDialogProps {
@@ -12,9 +10,7 @@ interface AuthDialogProps {
   onOpenChange: (open: boolean) => void;
   loading: boolean;
   telegramBotName?: string;
-  googleClientId?: string;
   onTelegramAuth: (payload: TelegramAuthPayload) => Promise<void>;
-  onGoogleCredential: (credential: string) => Promise<void>;
 }
 
 export const AuthDialog = ({
@@ -22,22 +18,15 @@ export const AuthDialog = ({
   onOpenChange,
   loading,
   telegramBotName,
-  googleClientId,
   onTelegramAuth,
-  onGoogleCredential,
 }: AuthDialogProps) => {
-  const googleContainerRef = useRef<HTMLDivElement | null>(null);
-
   const providersAvailable = useMemo(() => {
-    const providers: Array<"telegram" | "google"> = [];
+    const providers: Array<"telegram"> = [];
     if (telegramBotName) {
       providers.push("telegram");
     }
-    if (googleClientId) {
-      providers.push("google");
-    }
     return providers;
-  }, [telegramBotName, googleClientId]);
+  }, [telegramBotName]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -45,7 +34,7 @@ export const AuthDialog = ({
         <DialogHeader className="space-y-2">
           <DialogTitle>Войдите, чтобы сохранять прогресс</DialogTitle>
           <DialogDescription>
-            Используйте Telegram или Google — мы моментально создадим аккаунт и привяжем подписку.
+            Используйте Telegram — мы моментально создадим аккаунт и привяжем подписку.
           </DialogDescription>
         </DialogHeader>
 
@@ -53,7 +42,7 @@ export const AuthDialog = ({
           <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-muted-foreground/40 p-6 text-center">
             <LogIn className="h-10 w-10 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
-              Авторизация временно недоступна: добавьте TELEGRAM_BOT_USERNAME или GOOGLE_CLIENT_ID в .env.
+              Авторизация временно недоступна: добавьте TELEGRAM_BOT_USERNAME в .env.
             </p>
           </div>
         ) : (
@@ -63,23 +52,6 @@ export const AuthDialog = ({
                 botName={telegramBotName}
                 disabled={loading}
                 onAuth={onTelegramAuth}
-              />
-            ) : null}
-
-            {telegramBotName && googleClientId ? (
-              <div className="flex items-center gap-4 text-muted-foreground">
-                <Separator className="flex-1" />
-                <span className="text-xs uppercase tracking-widest">или</span>
-                <Separator className="flex-1" />
-              </div>
-            ) : null}
-
-            {googleClientId ? (
-              <GoogleLoginButton
-                clientId={googleClientId}
-                containerRef={googleContainerRef}
-                disabled={loading}
-                onCredential={onGoogleCredential}
               />
             ) : null}
           </div>

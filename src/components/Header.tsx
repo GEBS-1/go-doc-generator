@@ -27,15 +27,16 @@ const getInitials = (name?: string | null) => {
 
 export const Header = () => {
   const { user, isAuthenticated, promptLogin, logout } = useAuth();
+  const authRequired = import.meta.env.VITE_REQUIRE_AUTH !== "false";
 
   const handleStartClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
-      if (!isAuthenticated) {
+      if (authRequired && !isAuthenticated) {
         event.preventDefault();
         promptLogin();
       }
     },
-    [isAuthenticated, promptLogin],
+    [authRequired, isAuthenticated, promptLogin],
   );
 
   const subscriptionBadge = user?.subscription
@@ -88,7 +89,7 @@ export const Header = () => {
         <div className="flex items-center gap-3">
           {isAuthenticated && user ? (
             <>
-              <Link to="/generator" onClick={handleStartClick}>
+              <Link to="/generator" onClick={authRequired ? handleStartClick : undefined}>
                 <Button variant="default" size="sm" className="hidden md:inline-flex">
                   <Sparkles className="mr-2 h-4 w-4" />
                   Создать документ
@@ -142,10 +143,12 @@ export const Header = () => {
             </>
           ) : (
             <>
-              <Button variant="ghost" size="sm" onClick={promptLogin}>
-                Войти
-              </Button>
-              <Link to="/generator" onClick={handleStartClick}>
+              {authRequired ? (
+                <Button variant="ghost" size="sm" onClick={promptLogin}>
+                  Войти
+                </Button>
+              ) : null}
+              <Link to="/generator" onClick={authRequired ? handleStartClick : undefined}>
                 <Button variant="default" size="sm">
                   Начать бесплатно
                 </Button>

@@ -17,6 +17,8 @@ import { saveAs } from "file-saver";
 import { TableData, ChartData } from "@/lib/gigachat";
 import { chartToImage } from "@/lib/chartUtils";
 import { renderTitleTemplate, defaultTitleFields, TitleTemplateData } from "@/lib/titleTemplate";
+import { apiFetch, ApiError } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 
 const DOC_TYPE_OPTIONS = [
   { value: "essay", label: "Реферат", templateValue: "РЕФЕРАТ" },
@@ -42,6 +44,23 @@ interface Section {
   charts?: ChartData[];
 }
 
+interface SubscriptionUsage {
+  planId: string;
+  planName: string;
+  type: string | null;
+  status: string;
+  docsGenerated: number;
+  docsLimit: number | null;
+  resetDate: string | null;
+  activatedAt: string | null;
+  expiresAt: string | null;
+}
+
+interface ConsumeResponse {
+  allowed: boolean;
+  subscription: SubscriptionUsage | null;
+}
+
 interface TitlePageProps {
   sections: Section[];
   theme: string;
@@ -49,6 +68,8 @@ interface TitlePageProps {
 }
 
 export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
+  const { token, refreshProfile } = useAuth();
+  const authRequired = import.meta.env.VITE_REQUIRE_AUTH !== "false";
   const [titleFields, setTitleFields] = useState<{
     theme: string;
     documentType: DocTypeValue;
@@ -78,6 +99,28 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
     supervisorPosition: defaultTitleFields.SUPERVISOR_POSITION,
     city: defaultTitleFields.CITY,
   });
+  const formatUsageDescription = (usage?: SubscriptionUsage | null) => {
+    if (!usage || usage.docsLimit == null) {
+      return undefined;
+    }
+
+    const remaining = Math.max(usage.docsLimit - usage.docsGenerated, 0);
+    const resetLabel = usage.resetDate
+      ? new Date(usage.resetDate).toLocaleDateString("ru-RU")
+      : "обновления лимита";
+
+    return `Осталось ${remaining} из ${usage.docsLimit} документов до ${resetLabel}.`;
+  };
+  const mapQuotaErrorMessage = (code?: string) => {
+    switch (code) {
+      case "limit_exceeded":
+        return "Превышен лимит документов для текущего тарифа";
+      case "no_subscription":
+        return "Не найдена активная подписка. Обновите страницу или войдите снова.";
+      default:
+        return "Не удалось проверить лимит документов";
+    }
+  };
   const [templateFile, setTemplateFile] = useState<File | null>(null);
 
   const selectedDocType =
@@ -265,10 +308,47 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
   };
 
   const generateDocxDocument = async () => {
+    let preCheckUsage: SubscriptionUsage | null = null;
+    let postConsumeUsage: SubscriptionUsage | null = null;
+    const quotaEnabled = authRequired && Boolean(token);
+
     try {
       if (!titleFields.theme.trim() || !titleFields.author.trim()) {
         toast.error("Заполните тему и автора");
         return;
+      }
+
+      if (authRequired && !token) {
+        toast.error("Не удалось подтвердить авторизацию. Войдите снова.");
+        return;
+      }
+
+      if (quotaEnabled) {
+        try {
+          const response = await apiFetch<ConsumeResponse>("/api/subscription/consume", {
+            method: "POST",
+            token,
+            body: JSON.stringify({ consume: false }),
+          });
+          preCheckUsage = response.subscription ?? null;
+        } catch (quotaError) {
+          if (quotaError instanceof ApiError) {
+            const errorData =
+              (quotaError.data as { error?: string; subscription?: SubscriptionUsage | null }) || undefined;
+            const errorCode =
+              typeof errorData?.error === "string" ? errorData.error : undefined;
+            toast.error(mapQuotaErrorMessage(errorCode), {
+              description: formatUsageDescription(errorData?.subscription ?? null),
+            });
+          } else if (quotaError instanceof Error) {
+            toast.error("Не удалось проверить лимит документов", {
+              description: quotaError.message,
+            });
+          } else {
+            toast.error("Не удалось проверить лимит документов");
+          }
+          return;
+        }
       }
 
       toast.loading("Создание документа...");
@@ -1068,9 +1148,32 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
       // Generate and save the document
       const blob = await Packer.toBlob(doc);
       saveAs(blob, `${titleFields.theme || "document"}.docx`);
-      
+
       toast.dismiss();
-      toast.success("Документ скачан успешно!");
+
+      if (quotaEnabled) {
+        try {
+          const consumeResponse = await apiFetch<ConsumeResponse>("/api/subscription/consume", {
+            method: "POST",
+            token,
+            body: JSON.stringify({ consume: true }),
+          });
+          postConsumeUsage = consumeResponse.subscription ?? null;
+          await refreshProfile();
+        } catch (consumeError) {
+          console.error("Document quota consume error:", consumeError);
+        }
+      }
+
+      const usageDescription = quotaEnabled
+        ? formatUsageDescription(postConsumeUsage ?? preCheckUsage)
+        : authRequired
+          ? undefined
+          : "Демо-режим: генерация без авторизации.";
+
+      toast.success("Документ скачан успешно!", {
+        description: usageDescription,
+      });
     } catch (error) {
       toast.dismiss();
       
@@ -1092,7 +1195,6 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
       console.error("Error generating document:", error);
     }
   };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     generateDocxDocument();

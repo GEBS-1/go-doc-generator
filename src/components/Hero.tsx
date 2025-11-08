@@ -11,7 +11,7 @@ export const Hero = () => {
           <div className="space-y-8">
             <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
               <Sparkles className="h-4 w-4" />
-              Telegram &amp; Google вход за 10 секунд
+              Вход через Telegram за 10 секунд
             </div>
             
             <h1 className="text-5xl md:text-6xl font-bold text-foreground leading-tight">
@@ -37,7 +37,7 @@ export const Hero = () => {
             <div className="flex items-center gap-8 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
-                <span>Вход через Telegram или Google</span>
+                <span>Вход через Telegram</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
