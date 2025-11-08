@@ -10,9 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Lightbulb, BookOpen, FileText, GraduationCap, Newspaper, FileCheck, Upload, X } from "lucide-react";
+import { Sparkles, Lightbulb, BookOpen, FileText, GraduationCap, Newspaper, FileCheck } from "lucide-react";
 import { toast } from "sonner";
 import { DocumentType, documentTypes } from "@/lib/gigachat";
+import { useAuth } from "@/hooks/useAuth";
 
 interface ThemeInputProps {
   onNext: (theme: string, docType: DocumentType, sourceMaterials?: string) => void;
@@ -40,10 +41,16 @@ export const ThemeInput = ({ onNext }: ThemeInputProps) => {
   const [theme, setTheme] = useState("");
   const [docType, setDocType] = useState<DocumentType>("courseWork");
   const [sourceMaterials, setSourceMaterials] = useState("");
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const { isAuthenticated, promptLogin } = useAuth();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!isAuthenticated) {
+      toast.info("Пожалуйста, войдите через Telegram или Google, чтобы продолжить");
+      promptLogin();
+      return;
+    }
     
     if (!theme.trim()) {
       toast.error("Пожалуйста, введите тему документа");
@@ -62,19 +69,6 @@ export const ThemeInput = ({ onNext }: ThemeInputProps) => {
 
   const handleExampleClick = (example: string) => {
     setTheme(example);
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    
-    const newFiles = Array.from(files);
-    setUploadedFiles(prev => [...prev, ...newFiles]);
-    toast.success(`Загружено файлов: ${newFiles.length}`);
-  };
-
-  const handleRemoveFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   return (

@@ -12,16 +12,32 @@ import {
 } from "@/components/ui/select";
 import { Download, FileCheck } from "lucide-react";
 import { toast } from "sonner";
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, SectionType, Table, TableRow, TableCell, WidthType, ImageRun, Footer, PageNumber, PageNumberFormat, Header, TabStopType, TabStopPosition, FooterReference, HeaderReference, LevelFormat } from "docx";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, SectionType, Table, TableRow, TableCell, WidthType, ImageRun, Footer, PageNumber, Header, LevelFormat } from "docx";
 import { saveAs } from "file-saver";
 import { TableData, ChartData } from "@/lib/gigachat";
 import { chartToImage } from "@/lib/chartUtils";
-import JSZip from "jszip";
+import { renderTitleTemplate, defaultTitleFields, TitleTemplateData } from "@/lib/titleTemplate";
+
+const DOC_TYPE_OPTIONS = [
+  { value: "essay", label: "Реферат", templateValue: "РЕФЕРАТ" },
+  { value: "courseWork", label: "Курсовая работа", templateValue: "КУРСОВАЯ РАБОТА" },
+  {
+    value: "diploma",
+    label: "Выпускная квалификационная работа",
+    templateValue: "ВЫПУСКНАЯ КВАЛИФИКАЦИОННАЯ РАБОТА",
+  },
+  { value: "article", label: "Научная статья", templateValue: "НАУЧНАЯ СТАТЬЯ" },
+  { value: "report", label: "Отчёт", templateValue: "ОТЧЁТ" },
+] as const;
+
+type DocTypeOption = (typeof DOC_TYPE_OPTIONS)[number];
+type DocTypeValue = DocTypeOption["value"];
 
 interface Section {
   id: string;
   title: string;
   content?: string;
+  description?: string;
   tables?: TableData[];
   charts?: ChartData[];
 }
@@ -33,17 +49,39 @@ interface TitlePageProps {
 }
 
 export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
-  const [formData, setFormData] = useState({
-    organization: "",
-    department: "",
-    title: theme,
-    author: "",
-    city: "",
+  const [titleFields, setTitleFields] = useState<{
+    theme: string;
+    documentType: DocTypeValue;
+    year: string;
+    university: string;
+    faculty: string;
+    department: string;
+    direction: string;
+    profile: string;
+    author: string;
+    group: string;
+    supervisor: string;
+    supervisorPosition: string;
+    city: string;
+  }>({
+    theme: theme || "",
+    documentType: "courseWork",
     year: new Date().getFullYear().toString(),
-    supervisor: "",
-    template: "gost",
+    university: defaultTitleFields.UNIVERSITY,
+    faculty: defaultTitleFields.FACULTY,
+    department: defaultTitleFields.DEPARTMENT,
+    direction: defaultTitleFields.DIRECTION,
+    profile: defaultTitleFields.PROFILE,
+    author: "",
+    group: defaultTitleFields.GROUP,
+    supervisor: defaultTitleFields.SUPERVISOR,
+    supervisorPosition: defaultTitleFields.SUPERVISOR_POSITION,
+    city: defaultTitleFields.CITY,
   });
   const [templateFile, setTemplateFile] = useState<File | null>(null);
+
+  const selectedDocType =
+    DOC_TYPE_OPTIONS.find((option) => option.value === titleFields.documentType) ?? DOC_TYPE_OPTIONS[0];
 
   // Функция для конвертации base64 в Uint8Array для docx
   const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -54,6 +92,113 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
       bytes[i] = binaryString.charCodeAt(i);
     }
     return bytes;
+  };
+
+  const buildFallbackTitlePage = (data: TitleTemplateData): Paragraph[] => {
+    const paragraphs: Paragraph[] = [];
+
+    const pushCentered = (
+      text: string | undefined,
+      options: { size?: number; bold?: boolean; spacingAfter?: number } = {},
+    ) => {
+      if (!text) {
+        return;
+      }
+      const { size = 28, bold = false, spacingAfter = 200 } = options;
+      paragraphs.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { after: spacingAfter },
+          children: [
+            new TextRun({
+              text,
+              size,
+              bold,
+              font: "Times New Roman",
+              color: "000000",
+            }),
+          ],
+        }),
+      );
+    };
+
+    const pushLeft = (
+      text: string | undefined,
+      options: { spacingAfter?: number; size?: number } = {},
+    ) => {
+      if (!text) {
+        return;
+      }
+      const { spacingAfter = 200, size = 24 } = options;
+      paragraphs.push(
+        new Paragraph({
+          alignment: AlignmentType.LEFT,
+          spacing: { after: spacingAfter },
+          children: [
+            new TextRun({
+              text,
+              size,
+              font: "Times New Roman",
+              color: "000000",
+            }),
+          ],
+        }),
+      );
+    };
+
+    pushCentered("МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ", { bold: true, spacingAfter: 80 });
+    pushCentered("РОССИЙСКОЙ ФЕДЕРАЦИИ", { bold: true, spacingAfter: 160 });
+    pushCentered(data.UNIVERSITY, { spacingAfter: 80 });
+    pushCentered(data.FACULTY, { spacingAfter: 80, size: 26 });
+    pushCentered(data.DEPARTMENT, { spacingAfter: 200, size: 26 });
+    pushCentered(data.DIRECTION, { spacingAfter: 120, size: 24 });
+    pushCentered(data.PROFILE, { spacingAfter: 320, size: 24 });
+    pushCentered(data.DOC_TYPE, { bold: true, spacingAfter: 320 });
+    pushCentered(`«${data.THEME}»`, { bold: true, spacingAfter: 400 });
+
+    pushLeft(data.AUTHOR_LINE ?? (data.AUTHOR ? `Выполнил: ${data.AUTHOR}` : undefined), {
+      spacingAfter: 80,
+      size: 26,
+    });
+    pushLeft(data.GROUP_LINE ?? (data.GROUP ? `Группа: ${data.GROUP}` : undefined), {
+      spacingAfter: 160,
+    });
+    pushLeft(
+      data.SUPERVISOR_LINE ?? (data.SUPERVISOR ? `Руководитель: ${data.SUPERVISOR}` : undefined),
+      { spacingAfter: 80 },
+    );
+    pushLeft(
+      data.SUPERVISOR_POSITION_LINE ?? data.SUPERVISOR_POSITION,
+      { spacingAfter: 160 },
+    );
+    pushLeft(
+      data.DIRECTION_LINE ?? (data.DIRECTION ? `Направление подготовки: ${data.DIRECTION}` : undefined),
+      { spacingAfter: 120 },
+    );
+    pushLeft(
+      data.PROFILE_LINE ?? (data.PROFILE ? `Профиль: ${data.PROFILE}` : undefined),
+      { spacingAfter: 220 },
+    );
+
+    const locationLine = data.LOCATION_LINE ?? [data.CITY, data.YEAR].filter(Boolean).join(", ");
+    if (locationLine) {
+      paragraphs.push(
+        new Paragraph({
+          alignment: AlignmentType.RIGHT,
+          spacing: { before: 200 },
+          children: [
+            new TextRun({
+              text: locationLine,
+              size: 26,
+              font: "Times New Roman",
+              color: "000000",
+            }),
+          ],
+        }),
+      );
+    }
+
+    return paragraphs;
   };
 
   // Функция для создания таблицы из TableData
@@ -111,242 +256,86 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
     // docx работает с Uint8Array в браузере
     // В Node.js можно использовать Buffer, но в браузере используем Uint8Array
     return new ImageRun({
-      data: imageData as any, // docx принимает Buffer или Uint8Array
+      data: imageData,
       transformation: {
         width: 600,
         height: 400,
       },
-    });
+    } as any);
   };
 
   const generateDocxDocument = async () => {
     try {
-      // Validate required fields
-    if (!formData.organization || !formData.title || !formData.author) {
-      toast.error("Заполните обязательные поля");
-      return;
-    }
+      if (!titleFields.theme.trim() || !titleFields.author.trim()) {
+        toast.error("Заполните тему и автора");
+        return;
+      }
 
       toast.loading("Создание документа...");
 
-      const placeholderMap: Record<string, string> = {
-        "{{ORGANIZATION}}": formData.organization,
-        "{{DEPARTMENT}}": formData.department,
-        "{{TITLE}}": formData.title,
-        "{{AUTHOR}}": formData.author,
-        "{{SUPERVISOR}}": formData.supervisor,
-        "{{CITY}}": formData.city,
-        "{{YEAR}}": formData.year,
+      const docTypeConfig =
+        DOC_TYPE_OPTIONS.find((option) => option.value === titleFields.documentType) ?? DOC_TYPE_OPTIONS[0];
+
+      const normalizedYear =
+        titleFields.year && titleFields.year.trim().length > 0
+          ? titleFields.year.trim()
+          : new Date().getFullYear().toString();
+
+      const normalizedCity =
+        titleFields.city && titleFields.city.trim().length > 0
+          ? titleFields.city.trim()
+          : defaultTitleFields.CITY;
+
+      const templateData: TitleTemplateData = {
+        THEME: titleFields.theme.trim(),
+        DOC_TYPE: docTypeConfig.templateValue,
+        YEAR: normalizedYear,
+        UNIVERSITY: titleFields.university?.trim() || defaultTitleFields.UNIVERSITY,
+        FACULTY: titleFields.faculty?.trim() || defaultTitleFields.FACULTY,
+        DEPARTMENT: titleFields.department?.trim() || defaultTitleFields.DEPARTMENT,
+        DIRECTION: titleFields.direction?.trim() || defaultTitleFields.DIRECTION,
+        PROFILE: titleFields.profile?.trim() || defaultTitleFields.PROFILE,
+        AUTHOR: titleFields.author.trim(),
+        GROUP: titleFields.group?.trim() || "",
+        SUPERVISOR: titleFields.supervisor?.trim() || "",
+        SUPERVISOR_POSITION: titleFields.supervisorPosition?.trim() || "",
+        CITY: normalizedCity,
+        AUTHOR_LINE: `Выполнил: ${titleFields.author.trim()}`,
+        GROUP_LINE: titleFields.group?.trim() ? `Группа: ${titleFields.group.trim()}` : "",
+        SUPERVISOR_LINE: titleFields.supervisor?.trim()
+          ? `Руководитель: ${titleFields.supervisor.trim()}`
+          : "",
+        SUPERVISOR_POSITION_LINE: titleFields.supervisorPosition?.trim() || "",
+        DIRECTION_LINE: titleFields.direction?.trim()
+          ? `Направление подготовки: ${titleFields.direction.trim()}`
+          : defaultTitleFields.DIRECTION
+          ? `Направление подготовки: ${defaultTitleFields.DIRECTION}`
+          : "",
+        PROFILE_LINE: titleFields.profile?.trim()
+          ? `Профиль: ${titleFields.profile.trim()}`
+          : defaultTitleFields.PROFILE
+          ? `Профиль: ${defaultTitleFields.PROFILE}`
+          : "",
+        LOCATION_LINE: [normalizedCity, normalizedYear].filter(Boolean).join(", "),
       };
 
-      const replacePlaceholders = (value: string): string => {
-        let result = value;
-        Object.entries(placeholderMap).forEach(([placeholder, replacement]) => {
-          const safeReplacement = replacement || "";
-          result = result.replaceAll(placeholder, safeReplacement);
-          result = result.replaceAll(placeholder.toLowerCase(), safeReplacement);
-        });
-        return result;
-      };
+      let titlePageContent: Paragraph[];
 
-      const buildDefaultTitlePage = (): Paragraph[] => {
-        const content: Paragraph[] = [];
-
-        if (formData.organization) {
-          content.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: formData.organization,
-                  bold: true,
-                  size: 28,
-                  font: "Times New Roman",
-                  color: "000000",
-                }),
-              ],
-              alignment: AlignmentType.CENTER,
-              spacing: { after: 200 },
-            })
-          );
-        }
-
-        if (formData.department) {
-          content.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: formData.department,
-                  size: 24,
-                  font: "Times New Roman",
-                  color: "000000",
-                }),
-              ],
-              alignment: AlignmentType.CENTER,
-              spacing: { after: 400 },
-            })
-          );
-        }
-
-        const docType = formData.template === "gost"
-          ? "КУРСОВАЯ РАБОТА"
-          : formData.template === "business"
-          ? "АНАЛИТИЧЕСКИЙ ОТЧЁТ"
-          : "ДОКУМЕНТ";
-
-        content.push(
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: docType,
-                size: 20,
-                italics: true,
-                font: "Times New Roman",
-                color: "000000",
-              }),
-            ],
-            alignment: AlignmentType.CENTER,
-            spacing: { before: 1200, after: 400 },
-          })
-        );
-
-        content.push(
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: formData.title,
-                bold: true,
-                size: 24,
-                font: "Times New Roman",
-                color: "000000",
-              }),
-            ],
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 400 },
-          })
-        );
-
-        if (formData.supervisor) {
-          content.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: `Руководитель: ${formData.supervisor}`,
-                  size: 22,
-                  font: "Times New Roman",
-                  color: "000000",
-                }),
-              ],
-              alignment: AlignmentType.RIGHT,
-              spacing: { after: 200 },
-            })
-          );
-        }
-
-        content.push(
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: `Автор: ${formData.author}`,
-                size: 22,
-                font: "Times New Roman",
-                color: "000000",
-              }),
-            ],
-            alignment: AlignmentType.RIGHT,
-            spacing: { after: 800 },
-          })
-        );
-
-        const locationYear = [formData.city, formData.year].filter(Boolean).join(", ");
-        if (locationYear) {
-          content.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: locationYear,
-                  size: 22,
-                  font: "Times New Roman",
-                  color: "000000",
-                }),
-              ],
-              alignment: AlignmentType.RIGHT,
-              spacing: { after: 400 },
-            })
-          );
-        }
-
-        return content;
-      };
-
-      const buildTitlePageFromTemplate = async (): Promise<Paragraph[]> => {
-        if (!templateFile) {
-          return buildDefaultTitlePage();
-        }
-
+      try {
+        const buffer = templateFile ? await templateFile.arrayBuffer() : undefined;
+        titlePageContent = await renderTitleTemplate(templateData, buffer);
+      } catch (templateError) {
+        console.error("Title template render error", templateError);
+        toast.error("Не удалось применить шаблон титульного листа. Используется оформление по умолчанию");
         try {
-          const buffer = await templateFile.arrayBuffer();
-          const zip = await JSZip.loadAsync(buffer);
-          const documentXml = await zip.file("word/document.xml")?.async("string");
-
-          if (!documentXml) {
-            throw new Error("document.xml not found in template");
-          }
-
-          const parser = new DOMParser();
-          const xml = parser.parseFromString(documentXml, "application/xml");
-          const paragraphs = Array.from(xml.getElementsByTagName("w:p"));
-
-          if (paragraphs.length === 0) {
-            throw new Error("Template does not contain paragraphs");
-          }
-
-          return paragraphs.map((paragraphNode) => {
-            const textNodes = Array.from(paragraphNode.getElementsByTagName("w:t"));
-            const combinedText = textNodes.map((node) => node.textContent ?? "").join("");
-            const replacedText = replacePlaceholders(combinedText);
-
-            const alignmentNode = paragraphNode.getElementsByTagName("w:jc")[0];
-            const alignmentVal = alignmentNode?.getAttribute("w:val") ?? "left";
-            let alignment: AlignmentType | undefined;
-            switch (alignmentVal) {
-              case "center":
-                alignment = AlignmentType.CENTER;
-                break;
-              case "right":
-                alignment = AlignmentType.RIGHT;
-                break;
-              case "both":
-                alignment = AlignmentType.JUSTIFIED;
-                break;
-              default:
-                alignment = AlignmentType.LEFT;
-            }
-
-            return new Paragraph({
-              children: [
-                new TextRun({
-                  text: replacedText,
-                  font: "Times New Roman",
-                  size: 28,
-                  color: "000000",
-                }),
-              ],
-              alignment,
-              spacing: { after: 200 },
-            });
-          });
-        } catch (error) {
-          console.error("Template parsing error", error);
-          toast.error("Не удалось применить загруженный шаблон. Используется стандартный титульный лист");
-          return buildDefaultTitlePage();
+          titlePageContent = await renderTitleTemplate(templateData);
+        } catch (fallbackError) {
+          console.error("Fallback title template error", fallbackError);
+          titlePageContent = buildFallbackTitlePage(templateData);
         }
-      };
+      }
 
-      const titlePageContent = templateFile
-        ? await buildTitlePageFromTemplate()
-        : buildDefaultTitlePage();
-
-      const numberingConfigs: { reference: string; levels: Array<Record<string, unknown>> }[] = [];
+      const numberingConfigs: any[] = [];
       let bulletListCounter = 0;
       let numberedListCounter = 0;
 
@@ -598,8 +587,8 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                 if (!bibliographyEntries.has(assignedKey)) {
                   bibliographyEntries.set(assignedKey, cleaned);
                 }
-                return;
-              }
+      return;
+    }
 
               if (looksLikeReference && !isWater) {
                 const generatedKey = `auto-${++bibliographyAutoKey}`;
@@ -619,6 +608,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
             .filter((block) => block.length > 0);
 
           let pendingTableTitle: string | null = null;
+          const standaloneSectionHeadingPattern = /^(?:введение|основная часть|заключение)(?:[:.]?)$/i;
 
           for (let paraIndex = 0; paraIndex < rawParagraphBlocks.length; paraIndex++) {
             const rawBlock = rawParagraphBlocks[paraIndex];
@@ -653,7 +643,10 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                 .replace(/^>\s+/, '')
             );
 
-            const lines = cleanedLines.filter((line) => line.length > 0);
+            const lines = cleanedLines
+              .map((line) => line.trim())
+              .filter((line) => line.length > 0)
+              .filter((line) => !standaloneSectionHeadingPattern.test(line));
 
             if (lines.length === 0) {
               continue;
@@ -728,6 +721,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                 );
 
                 const asciiTable = createTableFromData({
+                  type: "comparative",
                   headers,
                   rows: dataRows,
                   title: finalTitle,
@@ -780,7 +774,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                   line: 360,
                 },
                 indent: {
-                  firstLine: 425,
+                  firstLine: 709,
                 },
               })
             );
@@ -900,10 +894,15 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
         const maxCitationNumber = sortedNumbers.length > 0 ? sortedNumbers[sortedNumbers.length - 1] : 0;
         const finalEntries: string[] = maxCitationNumber > 0 ? new Array(maxCitationNumber).fill('') : [];
 
+        const referencedCitationNumbers = new Set(sortedNumbers);
+
         bibliographyEntries.forEach((entry, key) => {
           const numericKey = Number(key);
           if (Number.isFinite(numericKey) && numericKey > 0) {
-            finalEntries[numericKey - 1] = entry;
+            const normalizedIndex = numericKey - 1;
+            const isReferenced = referencedCitationNumbers.has(numericKey);
+            const normalizedEntry = isReferenced ? entry : `${entry} [не упомянут в тексте]`;
+            finalEntries[normalizedIndex] = normalizedEntry;
           } else {
             finalEntries.push(entry);
           }
@@ -981,7 +980,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
       // Create the document
       const doc = new Document({
         creator: "DocuGen AI",
-        title: formData.title,
+        title: titleFields.theme,
         description: `Документ на тему: ${theme}`,
         numbering: {
           config: numberingConfigs,
@@ -1016,9 +1015,8 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                   left: marginLeft,
                 },
               },
-              // Нумерация начинается с оглавления
               pageNumberStart: 2,
-            },
+            } as any,
             headers: {
               default: new Header({
                 children: [
@@ -1069,7 +1067,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
 
       // Generate and save the document
       const blob = await Packer.toBlob(doc);
-      saveAs(blob, `${formData.title || "document"}.docx`);
+      saveAs(blob, `${titleFields.theme || "document"}.docx`);
       
       toast.dismiss();
       toast.success("Документ скачан успешно!");
@@ -1100,8 +1098,11 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
     generateDocxDocument();
   };
 
-  const handleInputChange = (field: string, value: string) => {
-    setFormData({ ...formData, [field]: value });
+  const handleFieldChange = (field: keyof typeof titleFields, value: string) => {
+    setTitleFields((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
   };
 
   const handleTemplateUpload = (file: File | null) => {
@@ -1141,42 +1142,113 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
               <h3 className="text-lg font-semibold">Основная информация</h3>
               
               <div className="space-y-2">
-                <Label htmlFor="organization">
-                  Организация <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="organization"
-                  value={formData.organization}
-                  onChange={(e) => handleInputChange("organization", e.target.value)}
-                  placeholder="Название учебного заведения или организации"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="department">Подразделение</Label>
-                <Input
-                  id="department"
-                  value={formData.department}
-                  onChange={(e) => handleInputChange("department", e.target.value)}
-                  placeholder="Кафедра или отдел"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="title">
+                <Label htmlFor="theme">
                   Тема <span className="text-destructive">*</span>
                 </Label>
                 <Input
-                  id="title"
-                  value={formData.title}
-                  onChange={(e) => handleInputChange("title", e.target.value)}
+                  id="theme"
+                  value={titleFields.theme}
+                  onChange={(e) => handleFieldChange("theme", e.target.value)}
                   placeholder="Название работы"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="documentType">Тип документа</Label>
+                <Select
+                  value={titleFields.documentType}
+                  onValueChange={(value) => handleFieldChange("documentType", value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите тип документа" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DOC_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="year">Год</Label>
+                <Input
+                  id="year"
+                  value={titleFields.year}
+                  onChange={(e) => handleFieldChange("year", e.target.value)}
+                  placeholder={new Date().getFullYear().toString()}
                 />
               </div>
             </Card>
 
             <Card className="p-6 space-y-4">
-              <h3 className="text-lg font-semibold">Автор и место</h3>
+              <h3 className="text-lg font-semibold">Учебное заведение</h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="university">Организация</Label>
+                <Input
+                  id="university"
+                  value={titleFields.university}
+                  onChange={(e) => handleFieldChange("university", e.target.value)}
+                  placeholder="Казанский (Приволжский) федеральный университет"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="faculty">Факультет / институт</Label>
+                <Input
+                  id="faculty"
+                  value={titleFields.faculty}
+                  onChange={(e) => handleFieldChange("faculty", e.target.value)}
+                  placeholder="Институт управления, экономики и финансов"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="department">Кафедра</Label>
+                <Input
+                  id="department"
+                  value={titleFields.department}
+                  onChange={(e) => handleFieldChange("department", e.target.value)}
+                  placeholder="Кафедра цифровой экономики"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="direction">Направление подготовки</Label>
+                <Input
+                  id="direction"
+                  value={titleFields.direction}
+                  onChange={(e) => handleFieldChange("direction", e.target.value)}
+                  placeholder="38.03.02 Менеджмент"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="profile">Профиль</Label>
+                <Input
+                  id="profile"
+                  value={titleFields.profile}
+                  onChange={(e) => handleFieldChange("profile", e.target.value)}
+                  placeholder="Цифровые технологии в бизнесе"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="city">Город</Label>
+                <Input
+                  id="city"
+                  value={titleFields.city}
+                  onChange={(e) => handleFieldChange("city", e.target.value)}
+                  placeholder={defaultTitleFields.CITY}
+                />
+              </div>
+            </Card>
+
+            <Card className="p-6 space-y-4">
+              <h3 className="text-lg font-semibold">Автор и научный руководитель</h3>
               
               <div className="space-y-2">
                 <Label htmlFor="author">
@@ -1184,67 +1256,53 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                 </Label>
                 <Input
                   id="author"
-                  value={formData.author}
-                  onChange={(e) => handleInputChange("author", e.target.value)}
-                  placeholder="ФИО автора"
+                  value={titleFields.author}
+                  onChange={(e) => handleFieldChange("author", e.target.value)}
+                  placeholder="Иванов Иван Иванович"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="supervisor">Руководитель</Label>
+                <Label htmlFor="group">Группа</Label>
                 <Input
-                  id="supervisor"
-                  value={formData.supervisor}
-                  onChange={(e) => handleInputChange("supervisor", e.target.value)}
-                  placeholder="ФИО и должность"
+                  id="group"
+                  value={titleFields.group}
+                  onChange={(e) => handleFieldChange("group", e.target.value)}
+                  placeholder="11-903"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="city">Город</Label>
+                <Label htmlFor="supervisor">Научный руководитель</Label>
                   <Input
-                    id="city"
-                    value={formData.city}
-                    onChange={(e) => handleInputChange("city", e.target.value)}
-                    placeholder="Москва"
+                  id="supervisor"
+                  value={titleFields.supervisor}
+                  onChange={(e) => handleFieldChange("supervisor", e.target.value)}
+                  placeholder="Петров П.П."
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="year">Год</Label>
+                <Label htmlFor="supervisorPosition">Должность руководителя</Label>
                   <Input
-                    id="year"
-                    value={formData.year}
-                    onChange={(e) => handleInputChange("year", e.target.value)}
-                    placeholder="2025"
-                  />
-                </div>
+                  id="supervisorPosition"
+                  value={titleFields.supervisorPosition}
+                  onChange={(e) => handleFieldChange("supervisorPosition", e.target.value)}
+                  placeholder="к.э.н., доцент"
+                />
               </div>
             </Card>
 
             <Card className="p-6 space-y-4">
-              <h3 className="text-lg font-semibold">Шаблон оформления</h3>
+              <h3 className="text-lg font-semibold">Индивидуальный шаблон</h3>
+
+              <p className="text-sm text-muted-foreground">
+                По умолчанию используется универсальный титульный лист по ГОСТ. При необходимости вы можете загрузить
+                собственный DOCX-шаблон и мы подставим значения в плейсхолдеры.
+              </p>
               
               <div className="space-y-2">
-                <Label htmlFor="template">Стиль документа</Label>
-                <Select
-                  value={formData.template}
-                  onValueChange={(value) => handleInputChange("template", value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="gost">ГОСТ (академический)</SelectItem>
-                    <SelectItem value="business">Деловой стиль</SelectItem>
-                    <SelectItem value="free">Свободный формат</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="templateFile">Индивидуальный шаблон титульного листа (DOCX)</Label>
+                <Label htmlFor="templateFile">Шаблон титульного листа (DOCX)</Label>
                 <Input
                   id="templateFile"
                   type="file"
@@ -1252,7 +1310,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                   onChange={(event) => handleTemplateUpload(event.target.files?.[0] ?? null)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  {"Загрузите ГОСТ-шаблон с плейсхолдерами вида {{ORGANIZATION}}, {{TITLE}}, {{AUTHOR}}, {{SUPERVISOR}}, {{CITY}}, {{YEAR}}. Поля будут заполнены автоматически."}
+                  {"Используйте плейсхолдеры: {{THEME}}, {{DOC_TYPE}}, {{YEAR}}, {{UNIVERSITY}}, {{FACULTY}}, {{DEPARTMENT}}, {{DIRECTION}}, {{PROFILE}}, {{AUTHOR_LINE}}, {{GROUP_LINE}}, {{SUPERVISOR_LINE}}, {{SUPERVISOR_POSITION_LINE}}, {{DIRECTION_LINE}}, {{PROFILE_LINE}}, {{LOCATION_LINE}}."}
                 </p>
                 {templateFile && (
                   <p className="text-xs text-muted-foreground italic">
@@ -1289,40 +1347,43 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
           <Card className="p-8 bg-secondary/30 sticky top-24">
             <h3 className="text-lg font-semibold mb-6">Предпросмотр</h3>
             <div className="space-y-8 text-center border-2 border-dashed border-border p-8 rounded-lg">
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <p className="text-sm font-semibold text-muted-foreground">
-                  {formData.organization || "НАЗВАНИЕ ОРГАНИЗАЦИИ"}
+                  {titleFields.university || defaultTitleFields.UNIVERSITY}
                 </p>
-                {formData.department && (
-                  <p className="text-xs text-muted-foreground">
-                    {formData.department}
-                  </p>
+                {titleFields.faculty && (
+                  <p className="text-xs text-muted-foreground">{titleFields.faculty}</p>
+                )}
+                {titleFields.department && (
+                  <p className="text-xs text-muted-foreground">{titleFields.department}</p>
+                )}
+                {titleFields.direction && (
+                  <p className="text-xs text-muted-foreground">Направление: {titleFields.direction}</p>
+                )}
+                {titleFields.profile && (
+                  <p className="text-xs text-muted-foreground">Профиль: {titleFields.profile}</p>
                 )}
               </div>
 
               <div className="space-y-4 py-8">
                 <p className="text-xs uppercase text-muted-foreground">
-                  {formData.template === "gost"
-                    ? "Курсовая работа"
-                    : formData.template === "business"
-                    ? "Аналитический отчёт"
-                    : "Документ"}
+                  {selectedDocType.label}
                 </p>
                 <p className="text-lg font-bold text-foreground">
-                  {formData.title || "ТЕМА ДОКУМЕНТА"}
+                  {titleFields.theme ? `«${titleFields.theme}»` : "«Тема документа»"}
                 </p>
               </div>
 
               <div className="space-y-2 text-sm text-muted-foreground">
-                {formData.supervisor && (
-                  <p>Руководитель: {formData.supervisor}</p>
-                )}
-                {formData.author && <p>Автор: {formData.author}</p>}
+                <p>Автор: {titleFields.author || "ФИО автора"}</p>
+                {titleFields.group && <p>Группа: {titleFields.group}</p>}
+                {titleFields.supervisor && <p>Руководитель: {titleFields.supervisor}</p>}
+                {titleFields.supervisorPosition && <p>{titleFields.supervisorPosition}</p>}
               </div>
 
               <div className="pt-8">
                 <p className="text-sm text-muted-foreground">
-                  {formData.city || "Город"}, {formData.year || "2025"}
+                  {(titleFields.city || defaultTitleFields.CITY) + ", " + (titleFields.year || new Date().getFullYear().toString())}
                 </p>
               </div>
             </div>

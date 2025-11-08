@@ -23,6 +23,22 @@ export default defineConfig(({ mode }) => ({
         secure: false, // Отключаем проверку SSL для development
         rewrite: (path) => path.replace(/^\/api\/gigachat-api/, ''),
       },
+      '/api/auth': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+      '/api/plans': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+      '/api/payments': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+      '/api/subscription': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
     },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),

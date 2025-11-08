@@ -1,10 +1,10 @@
-import { FileText, Settings, Download } from "lucide-react";
+import { LogIn, Settings, Download } from "lucide-react";
 
 const steps = [
   {
-    icon: FileText,
-    title: "Введите тему",
-    description: "Опишите тему вашего документа в нескольких словах — AI поймёт контекст",
+    icon: LogIn,
+    title: "Авторизуйтесь",
+    description: "Войдите через Telegram или Google — создадим аккаунт и сохраним ваши шаблоны.",
   },
   {
     icon: Settings,
@@ -13,8 +13,8 @@ const steps = [
   },
   {
     icon: Download,
-    title: "Скачайте файл",
-    description: "Получите готовый документ в формате .docx с оформлением по ГОСТ",
+    title: "Получите готовый DOCX",
+    description: "Оформление по ГОСТ, таблицы, графики и оплата подписки через YooKassa за пару кликов.",
   },
 ];
 

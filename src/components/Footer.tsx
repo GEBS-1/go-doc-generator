@@ -32,6 +32,11 @@ export const Footer = () => {
                 </Link>
               </li>
               <li>
+                <Link to="/#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  Тарифы
+                </Link>
+              </li>
+              <li>
                 <Link to="/generator" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
                   Начать создание
                 </Link>
@@ -59,9 +64,14 @@ export const Footer = () => {
             <h3 className="font-semibold mb-4">Контакты</h3>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Mail className="h-4 w-4" />
-              <a href="mailto:support@docugen.ai" className="hover:text-foreground transition-colors">
-                support@docugen.ai
-              </a>
+              <div className="flex flex-col">
+                <a href="mailto:support@docugen.ai" className="hover:text-foreground transition-colors">
+                  support@docugen.ai
+                </a>
+                <a href="mailto:team@docugen.ai" className="hover:text-foreground transition-colors">
+                  team@docugen.ai
+                </a>
+              </div>
             </div>
           </div>
         </div>

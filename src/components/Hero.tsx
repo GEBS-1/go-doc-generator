@@ -9,17 +9,17 @@ export const Hero = () => {
       <div className="container mx-auto px-4">
         <div className="grid lg:grid-cols-2 gap-12 items-center">
           <div className="space-y-8">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium">
+            <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
               <Sparkles className="h-4 w-4" />
-              AI-генерация за минуты
+              Telegram &amp; Google вход за 10 секунд
             </div>
             
             <h1 className="text-5xl md:text-6xl font-bold text-foreground leading-tight">
-              AI-документы за минуту
+              Профессиональные AI-документы за минуту
             </h1>
             
             <p className="text-xl text-muted-foreground leading-relaxed">
-              Введите тему, получите структуру, доработайте и скачайте профессиональный Word-файл по ГОСТ!
+              Генерируйте Word-файлы по ГОСТ с таблицами и графиками, сохраняйте подписку и прогресс в один клик.
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4">
@@ -37,11 +37,11 @@ export const Hero = () => {
             <div className="flex items-center gap-8 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
-                <span>Без регистрации</span>
+                <span>Вход через Telegram или Google</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
-                <span>По стандартам ГОСТ</span>
+                <span>Готовые DOCX по стандартам ГОСТ</span>
               </div>
             </div>
           </div>
