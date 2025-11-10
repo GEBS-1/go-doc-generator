@@ -3,6 +3,7 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const crypto = require('crypto');
+const https = require('https');
 const jwt = require('jsonwebtoken');
 const { YooCheckout } = require('@a2seven/yoo-checkout');
 const { run: dbRun, get: dbGet } = require('./db');
@@ -17,6 +18,7 @@ const {
   PAYMENT_RETURN_URL,
   FRONTEND_URL,
   ALLOWED_ORIGINS,
+  GIGACHAT_ALLOW_INSECURE_SSL,
 } = process.env;
 
 if (!AUTH_JWT_SECRET) {
@@ -42,6 +44,15 @@ const DEFAULT_FRONTEND_ORIGIN = FRONTEND_URL || 'http://localhost:8080';
 const allowedOrigins = ALLOWED_ORIGINS
   ? ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean)
   : [DEFAULT_FRONTEND_ORIGIN];
+
+const allowInsecureSsl = String(GIGACHAT_ALLOW_INSECURE_SSL).toLowerCase() === 'true';
+const httpsAgent = new https.Agent({
+  rejectUnauthorized: !allowInsecureSsl,
+});
+
+if (allowInsecureSsl) {
+  console.warn('[GigaChat] SSL verification disabled. Use only in trusted environments.');
+}
 
 const corsOptions = {
   origin(origin, callback) {
@@ -848,9 +859,7 @@ async function getAccessToken() {
              'Authorization': authorizationHeader,
            },
         timeout: OAUTH_TIMEOUT,
-        httpsAgent: new (require('https').Agent)({
-          rejectUnauthorized: true,
-        }),
+        httpsAgent,
       }
     );
 
@@ -929,6 +938,7 @@ app.post('/api/gigachat-api/:path(*)', async (req, res) => {
           'Authorization': `Bearer ${token}`,
         },
         timeout: API_TIMEOUT,
+        httpsAgent,
       }
     );
 
@@ -999,6 +1009,7 @@ app.post('/api/gigachat/generate', async (req, res) => {
           'Authorization': `Bearer ${token}`,
         },
         timeout: API_TIMEOUT,
+        httpsAgent,
       }
     );
 
