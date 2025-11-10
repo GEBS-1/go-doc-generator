@@ -28,28 +28,37 @@ export const TextGeneration = ({ sections, theme, onComplete }: TextGenerationPr
     const authKey = import.meta.env.VITE_GIGACHAT_AUTH_KEY;
     const clientId = import.meta.env.VITE_GIGACHAT_CLIENT_ID;
     const clientSecret = import.meta.env.VITE_GIGACHAT_CLIENT_SECRET;
-    
-    // Подробное логирование для диагностики
-    console.group('🔍 TextGeneration: Checking API Keys');
-    console.log('VITE_GIGACHAT_AUTH_KEY:', authKey ? `✓ Found (${authKey.substring(0, 15)}...)` : '✗ Not found');
-    console.log('VITE_GIGACHAT_CLIENT_ID:', clientId ? `✓ Found (${clientId.substring(0, 15)}...)` : '✗ Not found');
-    console.log('VITE_GIGACHAT_CLIENT_SECRET:', clientSecret ? '✓ Found' : '✗ Not found');
-    
-    // Проверяем наличие хотя бы одного метода авторизации
-    const hasKeys = !!(authKey || (clientId && clientSecret));
-    console.log('Has API Keys:', hasKeys ? '✅ YES' : '❌ NO');
-    
-    if (!hasKeys) {
-      console.warn('⚠️ API keys not found! Using demo mode.');
-      console.warn('Please create .env file in project root with:');
-      console.warn('  VITE_GIGACHAT_AUTH_KEY=your_authorization_key');
-      console.warn('  OR');
-      console.warn('  VITE_GIGACHAT_CLIENT_ID=your_client_id');
-      console.warn('  VITE_GIGACHAT_CLIENT_SECRET=your_client_secret');
-    }
+    const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
+    console.group("🔍 TextGeneration: Checking API Keys");
+    console.log(
+      "Backend URL:",
+      backendUrl ? `✓ Found (${backendUrl})` : "✗ Not found",
+    );
+    console.log(
+      "VITE_GIGACHAT_AUTH_KEY:",
+      authKey ? `✓ Found (${authKey.substring(0, 15)}...)` : "✗ Not found",
+    );
+    console.log(
+      "VITE_GIGACHAT_CLIENT_ID:",
+      clientId ? `✓ Found (${clientId.substring(0, 15)}...)` : "✗ Not found",
+    );
+    console.log(
+      "VITE_GIGACHAT_CLIENT_SECRET:",
+      clientSecret ? "✓ Found" : "✗ Not found",
+    );
+
+    const hasDirectKeys = !!(authKey || (clientId && clientSecret));
+    const canGenerate = !!backendUrl || hasDirectKeys;
+    console.log("Can generate via backend:", backendUrl ? "✅ YES" : "❌ NO");
+    console.log("Has direct keys:", hasDirectKeys ? "✅ YES" : "❌ NO");
+    console.log(
+      "Final availability:",
+      canGenerate ? "✅ Backend or keys configured" : "❌ No credentials",
+    );
     console.groupEnd();
-    
-    setHasApiKey(hasKeys);
+
+    setHasApiKey(canGenerate);
 
     const generateContent = async () => {
       const sectionsWithContent: Section[] = [];
@@ -61,7 +70,7 @@ export const TextGeneration = ({ sections, theme, onComplete }: TextGenerationPr
         try {
           let content: string;
           
-          if (authKey || (clientId && clientSecret)) {
+          if (backendUrl || authKey || (clientId && clientSecret)) {
             // Real AI generation
             content = await generateSectionContent(
               sections[i].title,
