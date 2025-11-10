@@ -40,8 +40,26 @@ const checkout = YOOKASSA_SHOP_ID && YOOKASSA_SECRET_KEY
 
 const DEFAULT_FRONTEND_ORIGIN = FRONTEND_URL || 'http://localhost:8080';
 const allowedOrigins = ALLOWED_ORIGINS
-  ? ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
+  ? ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean)
   : [DEFAULT_FRONTEND_ORIGIN];
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    console.warn(`[CORS] Blocked request from origin: ${origin}`);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
 
 const SUBSCRIPTION_PLANS = {
   free: {
@@ -487,10 +505,8 @@ const evaluateDocumentQuota = async (userId, { consume = false } = {}) => {
 };
 
 // Middleware
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true,
-}));
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
