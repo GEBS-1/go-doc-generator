@@ -36,6 +36,8 @@ if (import.meta.env.DEV) {
   console.groupEnd();
 }
 
+import { apiFetch } from "./api";
+
 interface GigaChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -63,6 +65,8 @@ interface TokenResponse {
 
 // Кэш для токена
 let cachedToken: TokenResponse | null = null;
+const backendBaseUrl = import.meta.env.VITE_BACKEND_URL;
+const useBackendProxy = Boolean(backendBaseUrl);
 
 // Таймауты (в миллисекундах)
 const OAUTH_TIMEOUT = 10000; // 10 секунд для OAuth
@@ -134,6 +138,12 @@ class GigaChatError extends Error {
  * - Client ID и Client Secret (из раздела "Настройки API")
  */
 async function getAccessToken(): Promise<string> {
+  if (useBackendProxy) {
+    throw new GigaChatError(
+      "BACKEND_PROXY",
+      "Получение токена должно происходить через backend proxy",
+    );
+  }
   // Проверяем наличие Authorization Key (приоритетный метод)
   const authKey = import.meta.env.VITE_GIGACHAT_AUTH_KEY;
   const clientId = import.meta.env.VITE_GIGACHAT_CLIENT_ID;
@@ -289,6 +299,28 @@ export async function generateTextWithGigaChat(
   messages.push({ role: 'user', content: prompt });
 
   try {
+    if (useBackendProxy) {
+      const response = await apiFetch<any>("/api/gigachat/generate", {
+        method: "POST",
+        body: {
+          prompt,
+          systemPrompt,
+          max_tokens: 2048,
+          temperature: 0.7,
+        },
+      });
+
+      const choice = response?.choices?.[0]?.message?.content;
+      if (!choice) {
+        throw new GigaChatError(
+          "INVALID_RESPONSE",
+          "Proxy вернул неожиданный ответ",
+          response,
+        );
+      }
+      return choice;
+    }
+
     // Получаем токен доступа
     const accessToken = await getAccessToken();
 
