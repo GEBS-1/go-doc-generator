@@ -39,12 +39,15 @@ export const StructureEditor = ({ theme, docType, sourceMaterials, onNext, onBac
     const authKey = import.meta.env.VITE_GIGACHAT_AUTH_KEY;
     const clientId = import.meta.env.VITE_GIGACHAT_CLIENT_ID;
     const clientSecret = import.meta.env.VITE_GIGACHAT_CLIENT_SECRET;
-    const hasApiCredentials = !!(authKey || (clientId && clientSecret));
+    const backendUrl = import.meta.env.VITE_BACKEND_URL;
+    const hasApiCredentials = !!(authKey || (clientId && clientSecret) || backendUrl);
     
     console.group('🔍 StructureEditor: API Keys Check');
     console.log('Has API credentials:', hasApiCredentials);
     if (!hasApiCredentials) {
-      console.warn('⚠️ No API keys found - will use default structure');
+      console.warn('⚠️ No API keys or backend URL found - will use default structure');
+    } else if (!authKey && !(clientId && clientSecret) && backendUrl) {
+      console.warn('ℹ️ Using backend API for structure generation');
     }
     console.groupEnd();
     
