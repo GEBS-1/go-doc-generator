@@ -1,95 +1,137 @@
-const fs = require('fs');
-const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 
-const DATA_DIR = path.join(__dirname, 'data');
-const DB_PATH = path.join(DATA_DIR, 'docugen.sqlite');
+const connectionString = process.env.DATABASE_URL;
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!connectionString) {
+  throw new Error('DATABASE_URL не задан. Укажите строку подключения к PostgreSQL в переменных окружения.');
+}
 
-const db = new sqlite3.Database(DB_PATH);
+const shouldUseSsl =
+  process.env.PGSSLMODE === 'require' ||
+  process.env.PGSSL === 'true' ||
+  /render\.com|supabase|railway|neon\.tech|aws/.test(connectionString);
 
-db.serialize(() => {
-  db.run('PRAGMA foreign_keys = ON');
-
-  db.run(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    telegram_id INTEGER UNIQUE,
-    username TEXT,
-    first_name TEXT,
-    photo_url TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS subscriptions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER UNIQUE,
-    plan TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'inactive',
-    docs_generated INTEGER NOT NULL DEFAULT 0,
-    docs_limit INTEGER,
-    reset_date TEXT,
-    activated_at TEXT,
-    expires_at TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS payments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    payment_id TEXT UNIQUE,
-    amount REAL,
-    currency TEXT,
-    plan TEXT,
-    status TEXT,
-    metadata TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-  )`);
+const pool = new Pool({
+  connectionString,
+  ssl: shouldUseSsl
+    ? {
+        rejectUnauthorized: false,
+      }
+    : undefined,
 });
 
-const run = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.run(sql, params, function runCallback(err) {
-      if (err) {
-        reject(err);
-      } else {
-        resolve({ lastID: this.lastID, changes: this.changes });
-      }
-    });
+const transformPlaceholders = (sql = '') => {
+  let index = 0;
+  const text = sql.replace(/\?/g, () => {
+    index += 1;
+    return `$${index}`;
   });
+  return { text, index };
+};
 
-const get = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(row || null);
-      }
-    });
-  });
+let initPromise;
 
-const all = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(rows || []);
-      }
-    });
-  });
+const runQuery = async (sql, params = []) => {
+  await initPromise;
+
+  const { text, index } = transformPlaceholders(sql);
+
+  if (index !== params.length) {
+    throw new Error(
+      `Количество плейсхолдеров и аргументов не совпадает для SQL: ${sql} (placeholders: ${index}, params: ${params.length})`,
+    );
+  }
+
+  return pool.query(text, params);
+};
+
+const initDatabase = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      telegram_id BIGINT UNIQUE NOT NULL,
+      username TEXT,
+      first_name TEXT,
+      photo_url TEXT,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      plan TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'inactive',
+      docs_generated INTEGER NOT NULL DEFAULT 0,
+      docs_limit INTEGER,
+      reset_date TIMESTAMPTZ,
+      activated_at TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payments (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      payment_id TEXT UNIQUE NOT NULL,
+      amount NUMERIC(10, 2),
+      currency TEXT DEFAULT 'RUB',
+      plan TEXT,
+      status TEXT DEFAULT 'pending',
+      metadata JSONB,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+};
+
+initPromise = initDatabase().catch((error) => {
+  console.error('[DB] Не удалось инициализировать базу данных:', error);
+  process.exit(1);
+});
+
+const run = async (sql, params = []) => {
+  const result = await runQuery(sql, params);
+  return {
+    lastID: result.rows?.[0]?.id ?? null,
+    changes: result.rowCount ?? 0,
+    rows: result.rows,
+  };
+};
+
+const get = async (sql, params = []) => {
+  const result = await runQuery(sql, params);
+  return result.rows?.[0] || null;
+};
+
+const all = async (sql, params = []) => {
+  const result = await runQuery(sql, params);
+  return result.rows;
+};
+
+const shutdown = async () => {
+  await initPromise;
+  await pool.end();
+};
+
+process.on('SIGINT', async () => {
+  await shutdown();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  await shutdown();
+  process.exit(0);
+});
 
 module.exports = {
-  db,
+  pool,
   run,
   get,
   all,
-  DB_PATH,
 };
-

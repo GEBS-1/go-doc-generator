@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import { Card } from "@/components/ui/card";
 import { Check, Loader2, AlertCircle } from "lucide-react";
@@ -23,6 +23,8 @@ export const TextGeneration = ({ sections, theme, onComplete }: TextGenerationPr
   const [progress, setProgress] = useState(0);
   const [generatedSections, setGeneratedSections] = useState<Section[]>([]);
   const [hasApiKey, setHasApiKey] = useState(true);
+  const rateLimitTriggeredRef = useRef(false);
+  const rateLimitToastShownRef = useRef(false);
 
   useEffect(() => {
     const authKey = import.meta.env.VITE_GIGACHAT_AUTH_KEY;
@@ -62,6 +64,7 @@ export const TextGeneration = ({ sections, theme, onComplete }: TextGenerationPr
 
     const generateContent = async () => {
       const sectionsWithContent: Section[] = [];
+      let rateLimitActive = rateLimitTriggeredRef.current;
       
       for (let i = 0; i < sections.length; i++) {
         setCurrentSection(i);
@@ -69,8 +72,11 @@ export const TextGeneration = ({ sections, theme, onComplete }: TextGenerationPr
 
         try {
           let content: string;
-          
-          if (backendUrl || authKey || (clientId && clientSecret)) {
+
+          if (rateLimitActive) {
+            content = generateMockContent(sections[i].title, sections[i].description);
+            await new Promise(resolve => setTimeout(resolve, 800));
+          } else if (backendUrl || authKey || (clientId && clientSecret)) {
             // Real AI generation
             content = await generateSectionContent(
               sections[i].title,
@@ -93,13 +99,27 @@ export const TextGeneration = ({ sections, theme, onComplete }: TextGenerationPr
           
           // Выводим понятные сообщения об ошибках
           if (error instanceof GigaChatError) {
-            toast.error(`Ошибка: ${error.message}`, {
-              description: error.code === 'NO_CREDENTIALS' 
-                ? 'Настройте API ключи в .env файле (VITE_GIGACHAT_AUTH_KEY или VITE_GIGACHAT_CLIENT_ID + SECRET)'
-                : error.code === 'NETWORK_ERROR'
-                ? 'Проверьте подключение к интернету'
-                : undefined
-            });
+            const isRateLimit =
+              typeof error.code === "string" && error.code.includes("429");
+
+            if (isRateLimit || /лимит|too many/i.test(error.message)) {
+              rateLimitActive = true;
+              rateLimitTriggeredRef.current = true;
+              if (!rateLimitToastShownRef.current) {
+                toast.error("GigaChat временно ограничил запросы", {
+                  description: "Подождите 1–2 минуты и попробуйте снова. Остальные разделы сформируем как черновики.",
+                });
+                rateLimitToastShownRef.current = true;
+              }
+            } else {
+              toast.error(`Ошибка: ${error.message}`, {
+                description: error.code === "NO_CREDENTIALS"
+                  ? "Настройте API ключи в .env файле (VITE_GIGACHAT_AUTH_KEY или VITE_GIGACHAT_CLIENT_ID + SECRET)"
+                  : error.code === "NETWORK_ERROR"
+                  ? "Проверьте подключение к интернету"
+                  : undefined,
+              });
+            }
           } else {
             toast.error(`Ошибка при генерации раздела: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
           }

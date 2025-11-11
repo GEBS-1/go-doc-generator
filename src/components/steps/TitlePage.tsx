@@ -401,18 +401,19 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
 
       let titlePageContent: Paragraph[];
 
-      try {
-        const buffer = templateFile ? await templateFile.arrayBuffer() : undefined;
-        titlePageContent = await renderTitleTemplate(templateData, buffer);
-      } catch (templateError) {
-        console.error("Title template render error", templateError);
-        toast.error("Не удалось применить шаблон титульного листа. Используется оформление по умолчанию");
+      if (templateFile) {
         try {
-          titlePageContent = await renderTitleTemplate(templateData);
-        } catch (fallbackError) {
-          console.error("Fallback title template error", fallbackError);
+          const buffer = await templateFile.arrayBuffer();
+          titlePageContent = await renderTitleTemplate(templateData, buffer);
+        } catch (templateError) {
+          console.error("Title template render error", templateError);
+          toast.error("Не удалось применить загруженный шаблон титульного листа.", {
+            description: "Проверьте, что каждый плейсхолдер вида {{FIELD}} встречается только один раз и не разбит на части.",
+          });
           titlePageContent = buildFallbackTitlePage(templateData);
         }
+      } else {
+        titlePageContent = buildFallbackTitlePage(templateData);
       }
 
       const numberingConfigs: any[] = [];

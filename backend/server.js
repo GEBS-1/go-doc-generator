@@ -341,11 +341,15 @@ const upsertTelegramUser = async (data) => {
   }
 
   const insertResult = await dbRun(
-    'INSERT INTO users (telegram_id, username, first_name, photo_url) VALUES (?, ?, ?, ?)',
+    'INSERT INTO users (telegram_id, username, first_name, photo_url) VALUES (?, ?, ?, ?) RETURNING id',
     [telegramId, username, fullName, photoUrl],
   );
 
-  const user = await fetchUserWithSubscription(insertResult.lastID);
+  const newUserId = insertResult.lastID || insertResult.rows?.[0]?.id;
+  if (!newUserId) {
+    throw new Error('Не удалось получить идентификатор нового пользователя');
+  }
+  const user = await fetchUserWithSubscription(newUserId);
   const ensured = await ensureFreeSubscription(user);
   return sanitizeUser(ensured);
 };
@@ -678,21 +682,21 @@ app.post('/api/payments/create', requireAuth, async (req, res) => {
       idempotenceKey
     );
 
-    const metadataJson = payment.metadata ? JSON.stringify(payment.metadata) : null;
+    const metadataPayload = payment.metadata ? payment.metadata : null;
     const status = payment.status || 'pending';
 
     const updated = await dbRun(
       `UPDATE payments
        SET amount = ?, currency = ?, plan = ?, status = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP
        WHERE payment_id = ?`,
-      [plan.amount, plan.currency, plan.id, status, metadataJson, payment.id],
+      [plan.amount, plan.currency, plan.id, status, metadataPayload, payment.id],
     );
 
     if (!updated.changes) {
       await dbRun(
         `INSERT INTO payments (user_id, payment_id, amount, currency, plan, status, metadata)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [userId, payment.id, plan.amount, plan.currency, plan.id, status, metadataJson],
+        [userId, payment.id, plan.amount, plan.currency, plan.id, status, metadataPayload],
       );
     }
 
@@ -731,7 +735,7 @@ app.post('/api/payments/webhook', async (req, res) => {
           ? 'canceled'
           : 'pending');
 
-    const metadataJson = JSON.stringify(metadata || null);
+    const metadataPayload = metadata || null;
 
     const updateResult = await dbRun(
       `UPDATE payments
@@ -739,7 +743,7 @@ app.post('/api/payments/webhook', async (req, res) => {
        WHERE payment_id = ?`,
       [
         status,
-        metadataJson,
+        metadataPayload,
         Number(paymentObject.amount?.value || 0),
         paymentObject.amount?.currency || 'RUB',
         metadata.planId || 'unknown',
@@ -758,7 +762,7 @@ app.post('/api/payments/webhook', async (req, res) => {
           paymentObject.amount?.currency || 'RUB',
           metadata.planId || 'unknown',
           status,
-          metadataJson,
+          metadataPayload,
         ],
       );
     } else if (!updateResult.changes) {
