@@ -7,6 +7,12 @@ const https = require('https');
 const jwt = require('jsonwebtoken');
 const { YooCheckout } = require('@a2seven/yoo-checkout');
 const { run: dbRun, get: dbGet } = require('./db');
+const {
+  initTelegramBot,
+  notifyPaymentSuccess,
+  notifyDocumentGenerated,
+  notifySubscriptionExpiring,
+} = require('./telegram-bot');
 
 const app = express();
 
@@ -610,7 +616,7 @@ app.get('/api/subscription', requireAuth, async (req, res) => {
 
 app.post('/api/subscription/consume', requireAuth, async (req, res) => {
   try {
-    const { consume = true } = req.body || {};
+    const { consume = true, documentName } = req.body || {};
 
     const result = await evaluateDocumentQuota(req.user.sub, { consume });
 
@@ -619,6 +625,11 @@ app.post('/api/subscription/consume', requireAuth, async (req, res) => {
         error: result.reason,
         subscription: result.subscription,
       });
+    }
+
+    // Отправляем уведомление в Telegram при успешной генерации
+    if (consume && documentName) {
+      await notifyDocumentGenerated(req.user.sub, documentName);
     }
 
     res.json({
@@ -770,7 +781,11 @@ app.post('/api/payments/webhook', async (req, res) => {
     }
 
     if (event.event === 'payment.succeeded' && metadata.userId && metadata.planId) {
+      const plan = planMeta(metadata.planId);
+      const planName = plan?.name || metadata.planId;
       await applySubscription(Number(metadata.userId), metadata.planId);
+      // Отправляем уведомление в Telegram
+      await notifyPaymentSuccess(Number(metadata.userId), planName);
     }
 
     if (event.event === 'payment.canceled' && metadata.userId) {
@@ -1141,6 +1156,21 @@ app.get('/health', (req, res) => {
 });
 
 /**
+ * Webhook endpoint для Telegram бота (если используется webhook)
+ */
+app.post('/api/telegram/webhook', express.json(), (req, res) => {
+  const { getBot } = require('./telegram-bot');
+  const bot = getBot();
+  
+  if (!bot) {
+    return res.status(503).json({ error: 'Telegram bot not initialized' });
+  }
+
+  bot.processUpdate(req.body);
+  res.status(200).json({ status: 'ok' });
+});
+
+/**
  * Обработка ошибок
  */
 app.use((err, req, res, next) => {
@@ -1154,12 +1184,18 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
 
+// Инициализация Telegram бота
+initTelegramBot();
+
 app.listen(PORT, HOST, () => {
   console.log(`🚀 GigaChat Proxy Server запущен на ${HOST}:${PORT}`);
   console.log(`📡 OAuth endpoint: POST /api/gigachat-oauth/*`);
   console.log(`📡 API endpoint: POST /api/gigachat-api/*`);
   console.log(`📡 Generate endpoint: POST /api/gigachat/generate`);
   console.log(`💚 Health check: GET /health`);
+  if (TELEGRAM_BOT_TOKEN) {
+    console.log(`🤖 Telegram Bot: инициализирован`);
+  }
 });
 
 module.exports = app;
