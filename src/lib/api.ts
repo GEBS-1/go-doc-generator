@@ -56,10 +56,25 @@ export async function apiFetch<TResponse = unknown>(
       ? path
       : `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 
+  console.log('[apiFetch] Запрос:', {
+    url,
+    method: rest.method || 'GET',
+    hasToken: !!token,
+    path,
+    API_BASE_URL,
+  });
+
   const response = await fetch(url, {
     ...rest,
     headers: baseHeaders,
     body: requestBody,
+  });
+
+  console.log('[apiFetch] Ответ:', {
+    status: response.status,
+    statusText: response.statusText,
+    ok: response.ok,
+    url: response.url,
   });
 
   if (response.status === 204) {

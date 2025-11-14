@@ -39,9 +39,16 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const telegramBotName = import.meta.env.VITE_TELEGRAM_BOT_USERNAME;
 
   const applyAuthState = useCallback((auth: AuthResponse) => {
+    console.log('[AuthContext] Сохранение токена и пользователя:', {
+      hasToken: !!auth.token,
+      hasUser: !!auth.user,
+      userId: auth.user?.id,
+      userName: auth.user?.name,
+    });
     setToken(auth.token);
     setUser(auth.user);
     localStorage.setItem(TOKEN_STORAGE_KEY, auth.token);
+    console.log('[AuthContext] Токен сохранен в localStorage');
   }, []);
 
   const clearAuthState = useCallback(() => {
@@ -52,20 +59,38 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const fetchProfile = useCallback(
     async (currentToken: string) => {
+      console.log('[AuthContext] Запрос профиля пользователя...');
       try {
         const data = await apiFetch<{ user: AuthUser }>("/api/auth/me", {
           method: "GET",
           token: currentToken,
         });
 
+        console.log('[AuthContext] Профиль получен:', {
+          hasUser: !!data?.user,
+          userId: data?.user?.id,
+          userName: data?.user?.name,
+        });
+
         if (data?.user) {
           setUser(data.user);
+          console.log('[AuthContext] Пользователь установлен в состояние');
+        } else {
+          console.warn('[AuthContext] Профиль не содержит пользователя');
+          clearAuthState();
         }
       } catch (error) {
-        console.error("Auth profile fetch error:", error);
+        console.error("[AuthContext] Ошибка загрузки профиля:", error);
+        if (error instanceof ApiError) {
+          console.error("[AuthContext] API Error:", {
+            status: error.status,
+            message: error.message,
+          });
+        }
         clearAuthState();
       } finally {
         setInitializing(false);
+        console.log('[AuthContext] Инициализация завершена');
       }
     },
     [clearAuthState],
@@ -73,10 +98,16 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   useEffect(() => {
     const savedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+    console.log('[AuthContext] Инициализация - проверка токена:', {
+      hasSavedToken: !!savedToken,
+      tokenLength: savedToken?.length,
+    });
     if (savedToken) {
       setToken(savedToken);
+      console.log('[AuthContext] Загрузка профиля с сохраненным токеном...');
       fetchProfile(savedToken);
     } else {
+      console.log('[AuthContext] Токен не найден в localStorage');
       setInitializing(false);
     }
   }, [fetchProfile]);
@@ -93,16 +124,29 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const authenticate = useCallback(
     async (path: string, payload: unknown) => {
+      console.log('[AuthContext] Начало авторизации:', { path, hasPayload: !!payload });
       setLoading(true);
       try {
         const auth = await apiFetch<AuthResponse>(path, {
           method: "POST",
           body: payload,
         });
+        console.log('[AuthContext] Авторизация успешна:', {
+          hasToken: !!auth.token,
+          hasUser: !!auth.user,
+        });
         applyAuthState(auth);
         setAuthDialogOpen(false);
         toast.success("Авторизация прошла успешно");
       } catch (error) {
+        console.error('[AuthContext] Ошибка авторизации:', error);
+        if (error instanceof ApiError) {
+          console.error('[AuthContext] API Error details:', {
+            status: error.status,
+            message: error.message,
+            data: error.data,
+          });
+        }
         handleAuthError(error, "Не удалось выполнить авторизацию");
         throw error;
       } finally {
