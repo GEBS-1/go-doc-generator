@@ -668,9 +668,21 @@ app.get('/api/auth/telegram/callback', async (req, res) => {
 // Endpoint для валидации временного токена от бота (как на poehali.dev)
 app.post('/api/auth/telegram-token', async (req, res) => {
   try {
+    console.log('[Auth] Запрос на /api/auth/telegram-token получен:', {
+      method: req.method,
+      url: req.url,
+      hasBody: !!req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : [],
+      headers: {
+        'content-type': req.headers['content-type'],
+        origin: req.headers.origin,
+      },
+    });
+
     const { token } = req.body;
     
     if (!token) {
+      console.warn('[Auth] Токен не предоставлен в запросе');
       return res.status(400).json({
         error: 'Токен не предоставлен',
       });
@@ -678,6 +690,7 @@ app.post('/api/auth/telegram-token', async (req, res) => {
 
     console.log('[Auth] Валидация токена от бота:', {
       token: token.substring(0, 8) + '...',
+      tokenLength: token.length,
     });
 
     // Проверяем токен в БД

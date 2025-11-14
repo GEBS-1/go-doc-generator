@@ -33,7 +33,20 @@ const Auth = () => {
     }
 
     // Отправляем токен на backend для валидации
-    apiFetch<AuthResponse>("/api/auth/telegram-token", {
+    const backendUrl = import.meta.env.VITE_BACKEND_URL;
+    const apiPath = "/api/auth/telegram-token";
+    const fullUrl = backendUrl 
+      ? `${backendUrl.replace(/\/$/, '')}${apiPath}`
+      : apiPath; // В development использует proxy
+
+    console.log("[Auth] Отправка запроса на валидацию токена:", {
+      backendUrl,
+      apiPath,
+      fullUrl,
+      hasToken: !!token,
+    });
+
+    apiFetch<AuthResponse>(apiPath, {
       method: "POST",
       body: { token },
     })

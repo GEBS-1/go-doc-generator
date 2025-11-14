@@ -26,6 +26,11 @@ export default defineConfig(({ mode }) => ({
       '/api/auth': {
         target: 'http://localhost:3001',
         changeOrigin: true,
+        rewrite: (path) => path, // Не переписываем путь, оставляем как есть
+      },
+      '/api/auth/telegram-token': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
       },
       '/api/plans': {
         target: 'http://localhost:3001',
