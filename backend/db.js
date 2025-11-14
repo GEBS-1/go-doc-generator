@@ -88,6 +88,28 @@ const initDatabase = async () => {
       updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // Таблица для временных токенов авторизации (как на poehali.dev)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_tokens (
+      id SERIAL PRIMARY KEY,
+      token TEXT UNIQUE NOT NULL,
+      telegram_id BIGINT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Индекс для быстрого поиска по токену
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_auth_tokens_token ON auth_tokens(token)
+  `);
+
+  // Индекс для очистки истекших токенов
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires ON auth_tokens(expires_at)
+  `);
 };
 
 initPromise = initDatabase().catch((error) => {

@@ -665,6 +665,98 @@ app.get('/api/auth/telegram/callback', async (req, res) => {
   }
 });
 
+// Endpoint для валидации временного токена от бота (как на poehali.dev)
+app.post('/api/auth/telegram-token', async (req, res) => {
+  try {
+    const { token } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({
+        error: 'Токен не предоставлен',
+      });
+    }
+
+    console.log('[Auth] Валидация токена от бота:', {
+      token: token.substring(0, 8) + '...',
+    });
+
+    // Проверяем токен в БД
+    const tokenRecord = await dbGet(
+      `SELECT * FROM auth_tokens 
+       WHERE token = ? AND expires_at > CURRENT_TIMESTAMP AND used = FALSE`,
+      [token]
+    );
+
+    if (!tokenRecord) {
+      console.warn('[Auth] Токен не найден или истек:', {
+        token: token.substring(0, 8) + '...',
+      });
+      return res.status(401).json({
+        error: 'Токен недействителен или истек',
+      });
+    }
+
+    // Получаем пользователя по telegram_id
+    const user = await dbGet(
+      `SELECT u.*, s.plan, s.status, s.docs_generated, s.docs_limit
+       FROM users u
+       LEFT JOIN subscriptions s ON u.id = s.user_id
+       WHERE u.telegram_id = ?`,
+      [tokenRecord.telegram_id]
+    );
+
+    if (!user) {
+      console.error('[Auth] Пользователь не найден для токена:', {
+        telegramId: tokenRecord.telegram_id,
+      });
+      return res.status(404).json({
+        error: 'Пользователь не найден',
+      });
+    }
+
+    // Помечаем токен как использованный
+    await dbRun(
+      `UPDATE auth_tokens SET used = TRUE WHERE token = ?`,
+      [token]
+    );
+
+    // Создаем JWT токен
+    const jwtToken = createToken({
+      sub: user.id,
+      provider: 'telegram',
+    });
+
+    console.log('[Auth] Токен валидирован, пользователь авторизован:', {
+      userId: user.id,
+      telegramId: user.telegram_id,
+    });
+
+    // Устанавливаем HTTP-only cookie с JWT токеном
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 дней
+      path: '/',
+    };
+
+    res.cookie('docugen_token', jwtToken, cookieOptions);
+
+    res.json({
+      success: true,
+      token: jwtToken, // Также возвращаем для совместимости с localStorage
+      user: sanitizeUser(user),
+    });
+  } catch (error) {
+    console.error('[Auth] Ошибка валидации токена:', error);
+    res.status(500).json({
+      error: 'Ошибка авторизации',
+      details: error.message,
+    });
+  }
+});
+
 // POST endpoint для обработки callback от виджета (data-onauth)
 app.post('/api/auth/telegram', async (req, res) => {
   try {

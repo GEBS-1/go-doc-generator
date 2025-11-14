@@ -1,4 +1,5 @@
 const TelegramBot = require('node-telegram-bot-api');
+const crypto = require('crypto');
 const { get: dbGet, run: dbRun, pool } = require('./db');
 
 let bot = null;
@@ -67,6 +68,31 @@ const registerUserFromTelegram = async (telegramUser) => {
   );
 
   return { isNew: true, userId: newUserId };
+};
+
+// Генерация временного токена для авторизации (как на poehali.dev)
+const generateAuthToken = async (telegramId) => {
+  // Генерируем UUID токен
+  const token = crypto.randomUUID();
+  
+  // Токен валиден 5 минут
+  const expiresAt = new Date();
+  expiresAt.setMinutes(expiresAt.getMinutes() + 5);
+  
+  // Сохраняем токен в БД
+  await dbRun(
+    `INSERT INTO auth_tokens (token, telegram_id, expires_at) 
+     VALUES (?, ?, ?)`,
+    [token, telegramId, expiresAt.toISOString()]
+  );
+  
+  console.log('[Telegram Bot] Сгенерирован токен авторизации:', {
+    token: token.substring(0, 8) + '...',
+    telegramId,
+    expiresAt: expiresAt.toISOString(),
+  });
+  
+  return token;
 };
 
 // Проверяем, валиден ли URL для Telegram (не localhost)
@@ -195,6 +221,10 @@ const initTelegramBot = () => {
         // Автоматически регистрируем пользователя, если его нет
         const registrationResult = await registerUserFromTelegram(msg.from);
         
+        // Генерируем временный токен для авторизации (как на poehali.dev)
+        const authToken = await generateAuthToken(telegramId);
+        const authLink = `${frontendUrl}/auth?token=${authToken}`;
+        
         // Получаем данные пользователя с подпиской
         const user = await dbGet(
           `SELECT u.*, s.plan, s.status, s.docs_generated, s.docs_limit
@@ -205,6 +235,8 @@ const initTelegramBot = () => {
         );
 
         const keyboard = [];
+        // Добавляем кнопку с ссылкой для авторизации
+        keyboard.push([{ text: '🔐 Войти на сайт', url: authLink }]);
         if (isValidTelegramUrl(frontendUrl)) {
           keyboard.push([{ text: '🌐 Открыть сайт', url: frontendUrl }]);
         }
@@ -222,12 +254,13 @@ const initTelegramBot = () => {
           await bot.sendMessage(
             chatId,
             `🎉 Добро пожаловать в DocuGen, ${msg.from.first_name || 'пользователь'}!\n\n` +
-            `✅ Вы успешно зарегистрированы!${planInfo}\n` +
-            `📝 Теперь вы можете:\n` +
+            `✅ Вы успешно зарегистрированы!${planInfo}\n\n` +
+            `🔐 Нажмите кнопку ниже, чтобы войти на сайт:\n` +
+            `(Ссылка действительна 5 минут)\n\n` +
+            `📝 После входа вы сможете:\n` +
             `• Генерировать документы по ГОСТ\n` +
             `• Использовать команды бота для управления подпиской\n` +
             `• Отслеживать использование документов\n\n` +
-            `🌐 Откройте сайт для начала работы:\n${frontendUrl}\n\n` +
             `Используйте команды:\n` +
             `/subscription - статус подписки\n` +
             `/usage - использовано документов\n` +
@@ -247,12 +280,13 @@ const initTelegramBot = () => {
           await bot.sendMessage(
             chatId,
             `👋 Привет, ${msg.from.first_name || 'пользователь'}!\n\n` +
-            `✅ Вы уже зарегистрированы в DocuGen!${planInfo}\n` +
+            `✅ Вы уже зарегистрированы в DocuGen!${planInfo}\n\n` +
+            `🔐 Нажмите кнопку ниже, чтобы войти на сайт:\n` +
+            `(Ссылка действительна 5 минут)\n\n` +
             `📝 Используйте команды:\n` +
             `/subscription - статус подписки\n` +
             `/usage - использовано документов\n` +
-            `/upgrade - купить подписку\n\n` +
-            `🌐 Открыть сайт: ${frontendUrl}`,
+            `/upgrade - купить подписку`,
             {
               reply_markup: {
                 inline_keyboard: keyboard,
