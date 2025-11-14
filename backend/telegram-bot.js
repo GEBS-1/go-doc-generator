@@ -98,10 +98,48 @@ const initTelegramBot = () => {
   }
 
   try {
-    // Используем polling для получения обновлений
-    // Для production можно переключить на webhook
-    const useWebhook = process.env.TELEGRAM_USE_WEBHOOK === 'true';
-    bot = new TelegramBot(token, { polling: !useWebhook });
+    // Автоматически определяем, использовать ли webhook
+    // В production (Render) используем webhook, локально - polling
+    const isProduction = process.env.NODE_ENV === 'production' || 
+                         process.env.RENDER === 'true' ||
+                         process.env.TELEGRAM_USE_WEBHOOK === 'true';
+    
+    if (isProduction) {
+      // Production: используем webhook
+      bot = new TelegramBot(token, { polling: false });
+      console.log('[Telegram Bot] Режим: Webhook (production)');
+      
+      // Устанавливаем webhook при старте
+      // Используем URL backend сервиса, не frontend
+      const backendUrl = process.env.BACKEND_URL || 
+                        process.env.RENDER_EXTERNAL_URL ||
+                        'https://go-doc-generator-backend.onrender.com';
+      const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL || 
+                        `${backendUrl.replace(/\/$/, '')}/api/telegram/webhook`;
+      
+      bot.setWebHook(webhookUrl)
+        .then(() => {
+          console.log(`[Telegram Bot] Webhook установлен: ${webhookUrl}`);
+        })
+        .catch((error) => {
+          console.error('[Telegram Bot] Ошибка установки webhook:', error.message);
+        });
+    } else {
+      // Development: используем polling
+      bot = new TelegramBot(token, { polling: true });
+      console.log('[Telegram Bot] Режим: Polling (development)');
+    }
+
+    // Обработка ошибок polling (409 Conflict)
+    bot.on('polling_error', (error) => {
+      // Игнорируем ошибку 409 - это нормально при перезапуске или нескольких экземплярах
+      if (error.code === 'ETELEGRAM' && error.response?.body?.error_code === 409) {
+        console.warn('[Telegram Bot] Polling конфликт (409) - другой экземпляр бота активен. Это нормально при перезапуске.');
+        return;
+      }
+      // Для других ошибок логируем
+      console.error('[Telegram Bot] Polling error:', error.message);
+    });
 
     // Обработка любого сообщения для автоматической регистрации
     bot.on('message', async (msg) => {
