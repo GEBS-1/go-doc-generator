@@ -38,7 +38,14 @@ export const TelegramLoginButton = ({ botName, onAuth, disabled }: TelegramLogin
     const cleanBotName = botName.replace('@', '');
     console.log('[TelegramLoginButton] Инициализация виджета для бота:', cleanBotName);
 
-    window.handleTelegramAuth = handleTelegramAuth;
+    // Объявляем функцию глобально ДО загрузки скрипта
+    // Telegram виджет ищет функцию по имени из data-onauth
+    (window as any).handleTelegramAuth = (user: any) => {
+      console.log('[TelegramLoginButton] Виджет вызвал handleTelegramAuth:', user);
+      handleTelegramAuth(user).catch((error) => {
+        console.error('[TelegramLoginButton] Ошибка в handleTelegramAuth:', error);
+      });
+    };
 
     const container = containerRef.current;
     container.innerHTML = "";
@@ -67,6 +74,16 @@ export const TelegramLoginButton = ({ botName, onAuth, disabled }: TelegramLogin
 
     script.onload = () => {
       console.log('[TelegramLoginButton] Скрипт Telegram Widget загружен');
+      console.log('[TelegramLoginButton] Проверка функции handleTelegramAuth:', typeof (window as any).handleTelegramAuth);
+      // Проверяем что виджет загрузился
+      setTimeout(() => {
+        const widget = container.querySelector('iframe');
+        if (widget) {
+          console.log('[TelegramLoginButton] Виджет iframe найден');
+        } else {
+          console.warn('[TelegramLoginButton] Виджет iframe не найден - возможно домен не добавлен в BotFather');
+        }
+      }, 1000);
     };
 
     container.appendChild(script);
@@ -75,8 +92,9 @@ export const TelegramLoginButton = ({ botName, onAuth, disabled }: TelegramLogin
       if (container.contains(script)) {
         container.removeChild(script);
       }
-      if (window.handleTelegramAuth === handleTelegramAuth) {
-        delete window.handleTelegramAuth;
+      // Очищаем глобальную функцию только если это наша
+      if ((window as any).handleTelegramAuth) {
+        delete (window as any).handleTelegramAuth;
       }
     };
   }, [botName, handleTelegramAuth, disabled]);

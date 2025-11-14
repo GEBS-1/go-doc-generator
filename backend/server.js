@@ -12,6 +12,7 @@ const {
   notifyPaymentSuccess,
   notifyDocumentGenerated,
   notifySubscriptionExpiring,
+  notifyUserRegistered,
 } = require('./telegram-bot');
 
 const app = express();
@@ -346,6 +347,7 @@ const upsertTelegramUser = async (data) => {
     return sanitizeUser(ensured);
   }
 
+  // Новый пользователь - создаем запись
   const insertResult = await dbRun(
     'INSERT INTO users (telegram_id, username, first_name, photo_url) VALUES (?, ?, ?, ?) RETURNING id',
     [telegramId, username, fullName, photoUrl],
@@ -357,6 +359,15 @@ const upsertTelegramUser = async (data) => {
   }
   const user = await fetchUserWithSubscription(newUserId);
   const ensured = await ensureFreeSubscription(user);
+  
+  // Отправляем уведомление о регистрации в Telegram
+  try {
+    await notifyUserRegistered(telegramId, data.first_name);
+  } catch (error) {
+    console.error('[Auth] Ошибка отправки уведомления о регистрации:', error);
+    // Не прерываем процесс регистрации, если уведомление не отправилось
+  }
+  
   return sanitizeUser(ensured);
 };
 
@@ -1185,7 +1196,17 @@ const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
 
 // Инициализация Telegram бота
-initTelegramBot();
+// Инициализируем бота после того, как база данных будет готова
+const { pool } = require('./db');
+pool.query('SELECT 1')
+  .then(() => {
+    console.log('[Server] База данных подключена, инициализируем Telegram бота...');
+    initTelegramBot();
+  })
+  .catch((error) => {
+    console.error('[Server] Ошибка подключения к базе данных:', error);
+    console.warn('[Server] Telegram бот не будет запущен');
+  });
 
 app.listen(PORT, HOST, () => {
   console.log(`🚀 GigaChat Proxy Server запущен на ${HOST}:${PORT}`);
@@ -1194,7 +1215,7 @@ app.listen(PORT, HOST, () => {
   console.log(`📡 Generate endpoint: POST /api/gigachat/generate`);
   console.log(`💚 Health check: GET /health`);
   if (TELEGRAM_BOT_TOKEN) {
-    console.log(`🤖 Telegram Bot: инициализирован`);
+    console.log(`🤖 Telegram Bot: инициализация...`);
   }
 });
 
