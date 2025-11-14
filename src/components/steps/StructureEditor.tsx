@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { GripVertical, Plus, Trash2, Edit2, Check, X, Loader2, Sparkles, Hash } from "lucide-react";
 import { toast } from "sonner";
 import { generateDocumentStructure, DocumentType, documentTypes, GigaChatError } from "@/lib/gigachat";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Section {
   id: string;
@@ -32,9 +33,21 @@ export const StructureEditor = ({ theme, docType, sourceMaterials, onNext, onBac
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [hasApiKey, setHasApiKey] = useState(false);
+  const { isAuthenticated, promptLogin } = useAuth();
+  const authRequired = import.meta.env.VITE_REQUIRE_AUTH !== "false";
 
   // Автоматически генерируем структуру при загрузке
   useEffect(() => {
+    // Проверяем авторизацию, если требуется
+    if (authRequired && !isAuthenticated) {
+      toast.info("Пожалуйста, войдите через Telegram, чтобы сгенерировать структуру", {
+        duration: 5000,
+      });
+      promptLogin();
+      setSections(getDefaultStructure(docType));
+      return;
+    }
+
     // Проверяем наличие API ключей
     const authKey = import.meta.env.VITE_GIGACHAT_AUTH_KEY;
     const clientId = import.meta.env.VITE_GIGACHAT_CLIENT_ID;
@@ -59,9 +72,18 @@ export const StructureEditor = ({ theme, docType, sourceMaterials, onNext, onBac
     }
 
     generateStructure();
-  }, [theme, docType, sourceMaterials]);
+  }, [theme, docType, sourceMaterials, isAuthenticated, authRequired]);
 
   const generateStructure = async () => {
+    // Проверяем авторизацию перед генерацией
+    if (authRequired && !isAuthenticated) {
+      toast.info("Пожалуйста, войдите через Telegram, чтобы сгенерировать структуру", {
+        duration: 5000,
+      });
+      promptLogin();
+      return;
+    }
+
     setIsGenerating(true);
     try {
       const generatedStructure = await generateDocumentStructure(theme, docType, sourceMaterials);
