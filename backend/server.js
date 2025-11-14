@@ -807,6 +807,21 @@ const OAUTH_URL = 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth';
 const API_URL = 'https://gigachat.devices.sberbank.ru/api/v1/chat/completions';
 const OAUTH_TIMEOUT = 10000; // 10 секунд
 const API_TIMEOUT = 60000; // 60 секунд
+const GIGACHAT_MAX_RETRIES = (() => {
+  const parsed = Number(process.env.GIGACHAT_MAX_RETRIES);
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : 3;
+})();
+const GIGACHAT_RETRY_DELAY_MS = (() => {
+  const parsed = Number(process.env.GIGACHAT_RETRY_DELAY_MS);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2000;
+})();
+const GIGACHAT_QUEUE_COOLDOWN_MS = (() => {
+  const parsed = Number(process.env.GIGACHAT_QUEUE_COOLDOWN_MS);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 500;
+})();
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const gigaChatQueue = [];
+let isProcessingGigaChatQueue = false;
 
 /**
  * Получение OAuth токена
@@ -895,6 +910,80 @@ async function getAccessToken() {
   }
 }
 
+function enqueueGigaChatCall(builder) {
+  return new Promise((resolve, reject) => {
+    gigaChatQueue.push({ builder, resolve, reject });
+    processGigaChatQueue();
+  });
+}
+
+async function processGigaChatQueue() {
+  if (isProcessingGigaChatQueue) {
+    return;
+  }
+
+  isProcessingGigaChatQueue = true;
+
+  while (gigaChatQueue.length > 0) {
+    const { builder, resolve, reject } = gigaChatQueue.shift();
+
+    try {
+      const result = await executeGigaChatWithRetries(builder);
+      resolve(result);
+    } catch (error) {
+      reject(error);
+    }
+
+    if (gigaChatQueue.length > 0 && GIGACHAT_QUEUE_COOLDOWN_MS > 0) {
+      await sleep(GIGACHAT_QUEUE_COOLDOWN_MS);
+    }
+  }
+
+  isProcessingGigaChatQueue = false;
+}
+
+async function executeGigaChatWithRetries(builder) {
+  let lastError;
+
+  for (let attempt = 0; attempt < GIGACHAT_MAX_RETRIES; attempt += 1) {
+    try {
+      const token = await getAccessToken();
+      return await builder(token);
+    } catch (error) {
+      lastError = error;
+      const status = error?.response?.status;
+      const networkCode = error?.code;
+
+      if (status === 401) {
+        tokenCache = { token: null, expiresAt: null };
+      }
+
+      const shouldRetry =
+        status === 429 ||
+        status === 408 ||
+        status === 500 ||
+        status === 502 ||
+        status === 503 ||
+        status === 504 ||
+        (!status && (networkCode === 'ECONNRESET' || networkCode === 'ETIMEDOUT'));
+
+      const isLastAttempt = attempt === GIGACHAT_MAX_RETRIES - 1;
+
+      if (!shouldRetry || isLastAttempt) {
+        break;
+      }
+
+      const delay = GIGACHAT_RETRY_DELAY_MS * Math.max(1, Math.pow(2, attempt));
+      console.warn(
+        `[GigaChat Queue] попытка ${attempt + 1} завершилась ошибкой ${status || networkCode || error.message}. Повтор через ${delay} мс`,
+      );
+      await sleep(delay);
+    }
+  }
+
+  throw lastError;
+}
+
 /**
  * Proxy endpoint для OAuth (если нужен прямой доступ)
  */
@@ -916,8 +1005,6 @@ app.post('/api/gigachat-oauth/:path(*)', async (req, res) => {
  */
 app.post('/api/gigachat-api/:path(*)', async (req, res) => {
   try {
-    const token = await getAccessToken();
-    
     // Извлекаем данные из запроса
     const { model = 'GigaChat', messages, temperature = 0.7, max_tokens = 2000 } = req.body;
 
@@ -928,22 +1015,24 @@ app.post('/api/gigachat-api/:path(*)', async (req, res) => {
       });
     }
 
-    const response = await axios.post(
-      API_URL,
-      {
-        model,
-        messages,
-        temperature,
-        max_tokens,
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+    const response = await enqueueGigaChatCall((token) =>
+      axios.post(
+        API_URL,
+        {
+          model,
+          messages,
+          temperature,
+          max_tokens,
         },
-        timeout: API_TIMEOUT,
-        httpsAgent,
-      }
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          timeout: API_TIMEOUT,
+          httpsAgent,
+        },
+      ),
     );
 
     res.json(response.data);
@@ -984,7 +1073,6 @@ app.post('/api/gigachat-api/:path(*)', async (req, res) => {
  */
 app.post('/api/gigachat/generate', async (req, res) => {
   try {
-    const token = await getAccessToken();
     const { prompt, systemPrompt, max_tokens = 2048, temperature = 0.7 } = req.body;
 
     if (!prompt) {
@@ -999,22 +1087,24 @@ app.post('/api/gigachat/generate', async (req, res) => {
     }
     messages.push({ role: 'user', content: prompt });
 
-    const response = await axios.post(
-      API_URL,
-      {
-        model: 'GigaChat',
-        messages,
-        temperature,
-        max_tokens,
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+    const response = await enqueueGigaChatCall((token) =>
+      axios.post(
+        API_URL,
+        {
+          model: 'GigaChat',
+          messages,
+          temperature,
+          max_tokens,
         },
-        timeout: API_TIMEOUT,
-        httpsAgent,
-      }
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          timeout: API_TIMEOUT,
+          httpsAgent,
+        },
+      ),
     );
 
     res.json(response.data);
