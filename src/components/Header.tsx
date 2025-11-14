@@ -28,6 +28,17 @@ const getInitials = (name?: string | null) => {
 export const Header = () => {
   const { user, isAuthenticated, promptLogin, logout } = useAuth();
   const authRequired = import.meta.env.VITE_REQUIRE_AUTH !== "false";
+  
+  // Отладка для проверки переменных окружения
+  if (typeof window !== 'undefined') {
+    console.log('[Header] Environment check:', {
+      VITE_REQUIRE_AUTH: import.meta.env.VITE_REQUIRE_AUTH,
+      authRequired,
+      VITE_BACKEND_URL: import.meta.env.VITE_BACKEND_URL,
+      isAuthenticated,
+      hasUser: !!user,
+    });
+  }
 
   const handleStartClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -143,11 +154,12 @@ export const Header = () => {
             </>
           ) : (
             <>
-              {authRequired ? (
+              {/* Всегда показываем кнопку "Войти" если требуется авторизация */}
+              {authRequired && (
                 <Button variant="ghost" size="sm" onClick={promptLogin}>
                   Войти
                 </Button>
-              ) : null}
+              )}
               <Link to="/generator" onClick={authRequired ? handleStartClick : undefined}>
                 <Button variant="default" size="sm">
                   Начать бесплатно
