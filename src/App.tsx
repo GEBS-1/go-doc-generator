@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import Generator from "./pages/Generator";
 import NotFound from "./pages/NotFound";
 import PaymentStatus from "./pages/PaymentStatus";
+import AuthCallback from "./pages/AuthCallback";
 
 const queryClient = new QueryClient();
 
@@ -20,6 +21,7 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/generator" element={<Generator />} />
           <Route path="/payment/:state" element={<PaymentStatus />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

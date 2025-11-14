@@ -158,12 +158,28 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const handleTelegramAuth = useCallback(
     async (payload: TelegramAuthPayload) => {
+      console.log('[AuthContext] handleTelegramAuth вызван:', {
+        hasPayload: !!payload,
+        hasHash: !!payload?.hash,
+        userId: payload?.id,
+        firstName: payload?.first_name,
+        username: payload?.username,
+      });
+      
       if (!payload?.hash) {
+        console.error('[AuthContext] ОШИБКА: hash отсутствует в payload!');
         toast.error("Некорректный ответ от Telegram");
         return;
       }
 
-      await authenticate("/api/auth/telegram", payload);
+      console.log('[AuthContext] Вызываем authenticate("/api/auth/telegram", payload)...');
+      try {
+        await authenticate("/api/auth/telegram", payload);
+        console.log('[AuthContext] authenticate успешно завершен');
+      } catch (error) {
+        console.error('[AuthContext] ОШИБКА в authenticate:', error);
+        throw error;
+      }
     },
     [authenticate],
   );

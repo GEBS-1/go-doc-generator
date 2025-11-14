@@ -20,10 +20,24 @@ export const TelegramLoginButton = ({ botName, onAuth, disabled }: TelegramLogin
 
   const handleTelegramAuth = useCallback(
     async (payload: TelegramAuthPayload) => {
+      console.log('[TelegramLoginButton] handleTelegramAuth callback вызван:', {
+        hasPayload: !!payload,
+        hasHash: !!payload?.hash,
+        userId: payload?.id,
+        firstName: payload?.first_name,
+      });
+      
       try {
+        console.log('[TelegramLoginButton] Вызываем onAuth...');
         await onAuth(payload);
+        console.log('[TelegramLoginButton] onAuth успешно завершен');
       } catch (error) {
-        console.error("Telegram auth failed", error);
+        console.error("[TelegramLoginButton] ОШИБКА в onAuth:", error);
+        if (error instanceof Error) {
+          console.error("[TelegramLoginButton] Error message:", error.message);
+          console.error("[TelegramLoginButton] Error stack:", error.stack);
+        }
+        throw error;
       }
     },
     [onAuth],
@@ -41,24 +55,73 @@ export const TelegramLoginButton = ({ botName, onAuth, disabled }: TelegramLogin
     // Объявляем функцию глобально ДО загрузки скрипта
     // Telegram виджет ищет функцию по имени из data-onauth
     (window as any).handleTelegramAuth = (user: any) => {
-      console.log('[TelegramLoginButton] Виджет вызвал handleTelegramAuth:', user);
-      handleTelegramAuth(user).catch((error) => {
-        console.error('[TelegramLoginButton] Ошибка в handleTelegramAuth:', error);
+      console.log('[TelegramLoginButton] ===== ВИДЖЕТ ВЫЗВАЛ handleTelegramAuth =====');
+      console.log('[TelegramLoginButton] Данные от Telegram:', {
+        hasUser: !!user,
+        userId: user?.id,
+        firstName: user?.first_name,
+        username: user?.username,
+        hash: user?.hash ? 'present' : 'missing',
+        auth_date: user?.auth_date,
+        fullData: user,
       });
+      
+      if (!user) {
+        console.error('[TelegramLoginButton] ОШИБКА: user is null/undefined!');
+        return;
+      }
+      
+      if (!user.hash) {
+        console.error('[TelegramLoginButton] ОШИБКА: hash отсутствует в данных!');
+        return;
+      }
+      
+      console.log('[TelegramLoginButton] Вызываем handleTelegramAuth callback...');
+      handleTelegramAuth(user)
+        .then(() => {
+          console.log('[TelegramLoginButton] handleTelegramAuth успешно завершен');
+        })
+        .catch((error) => {
+          console.error('[TelegramLoginButton] ОШИБКА в handleTelegramAuth:', error);
+          console.error('[TelegramLoginButton] Stack:', error?.stack);
+        });
     };
+    
+    // Проверяем что функция установлена
+    console.log('[TelegramLoginButton] Глобальная функция установлена:', {
+      exists: typeof (window as any).handleTelegramAuth === 'function',
+      name: 'handleTelegramAuth',
+    });
 
     const container = containerRef.current;
     container.innerHTML = "";
 
+    // Определяем URL для редиректа (data-auth-url)
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+    const authCallbackUrl = `${backendUrl.replace(/\/$/, '')}/api/auth/telegram/callback`;
+    
     const script = document.createElement("script");
     script.src = "https://telegram.org/js/telegram-widget.js?22";
     script.async = true;
     script.dataset.telegramLogin = cleanBotName;
     script.dataset.size = "large";
     script.dataset.userpic = "false";
-    script.dataset.onauth = "handleTelegramAuth";
+    // Используем data-auth-url для редиректа (более надежно для production)
+    script.dataset.authUrl = authCallbackUrl;
+    // Также оставляем data-onauth для совместимости (если домен добавлен в BotFather)
+    script.dataset.onauth = "handleTelegramAuth(user)";
     script.dataset.requestAccess = "write";
     script.dataset.radius = "10";
+    
+    // Логируем атрибуты скрипта
+    console.log('[TelegramLoginButton] Атрибуты скрипта виджета:', {
+      telegramLogin: script.dataset.telegramLogin,
+      size: script.dataset.size,
+      authUrl: script.dataset.authUrl,
+      onauth: script.dataset.onauth,
+      requestAccess: script.dataset.requestAccess,
+      src: script.src,
+    });
 
     script.onerror = () => {
       console.error('[TelegramLoginButton] Ошибка загрузки скрипта Telegram Widget');

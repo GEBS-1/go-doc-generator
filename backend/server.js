@@ -551,8 +551,93 @@ app.get('/api/plans', (req, res) => {
   });
 });
 
+// Вспомогательная функция для проверки данных Telegram
+const verifyTelegramAuth = (data) => {
+  if (!TELEGRAM_BOT_TOKEN) {
+    throw new Error('TELEGRAM_BOT_TOKEN не задан');
+  }
+
+  const { hash, auth_date: authDate } = data;
+
+  if (!hash || !data.id) {
+    throw new Error('Некорректные данные авторизации Telegram');
+  }
+
+  const secret = crypto.createHash('sha256').update(TELEGRAM_BOT_TOKEN).digest();
+  const dataCheckString = Object.keys(data)
+    .filter((key) => key !== 'hash')
+    .sort()
+    .map((key) => `${key}=${data[key]}`)
+    .join('\n');
+
+  const computedHash = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
+
+  if (computedHash !== hash) {
+    throw new Error('Не удалось подтвердить данные Telegram');
+  }
+
+  if (authDate && Date.now() / 1000 - Number(authDate) > 86400) {
+    throw new Error('Данные авторизации устарели, попробуйте ещё раз');
+  }
+
+  return true;
+};
+
+// GET endpoint для обработки редиректа от Telegram виджета (data-auth-url)
+app.get('/api/auth/telegram/callback', async (req, res) => {
+  try {
+    console.log('[Auth] Telegram callback (GET) - получены параметры:', Object.keys(req.query));
+    
+    if (!TELEGRAM_BOT_TOKEN) {
+      return res.redirect(`${DEFAULT_FRONTEND_ORIGIN}/?error=telegram_unavailable`);
+    }
+
+    // Получаем данные из query параметров (Telegram отправляет их в URL)
+    const data = req.query || {};
+    const { hash, auth_date: authDate } = data;
+
+    if (!hash || !data.id) {
+      console.error('[Auth] Telegram callback - отсутствуют обязательные параметры');
+      return res.redirect(`${DEFAULT_FRONTEND_ORIGIN}/?error=invalid_data`);
+    }
+
+    // Проверяем данные
+    try {
+      verifyTelegramAuth(data);
+    } catch (error) {
+      console.error('[Auth] Telegram callback - ошибка проверки:', error.message);
+      return res.redirect(`${DEFAULT_FRONTEND_ORIGIN}/?error=verification_failed`);
+    }
+
+    // Создаем/обновляем пользователя
+    const user = await upsertTelegramUser(data);
+
+    // Создаем токен
+    const token = createToken({
+      sub: user.id,
+      provider: 'telegram',
+    });
+
+    console.log('[Auth] Telegram callback - авторизация успешна, перенаправление на фронтенд');
+
+    // Перенаправляем на фронтенд с токеном в URL
+    // Фронтенд должен извлечь токен из URL и сохранить в localStorage
+    const redirectUrl = new URL(`${DEFAULT_FRONTEND_ORIGIN}/auth/callback`);
+    redirectUrl.searchParams.set('token', token);
+    redirectUrl.searchParams.set('success', 'true');
+
+    res.redirect(redirectUrl.toString());
+  } catch (error) {
+    console.error('[Auth] Telegram callback error:', error);
+    res.redirect(`${DEFAULT_FRONTEND_ORIGIN}/?error=auth_failed`);
+  }
+});
+
+// POST endpoint для обработки callback от виджета (data-onauth)
 app.post('/api/auth/telegram', async (req, res) => {
   try {
+    console.log('[Auth] Telegram auth (POST) - получены данные');
+    
     if (!TELEGRAM_BOT_TOKEN) {
       return res.status(503).json({
         error: 'Telegram авторизация временно недоступна',
@@ -560,32 +645,13 @@ app.post('/api/auth/telegram', async (req, res) => {
     }
 
     const data = req.body || {};
-    const { hash, auth_date: authDate } = data;
-
-    if (!hash || !data.id) {
-      return res.status(400).json({
-        error: 'Некорректные данные авторизации Telegram',
-      });
-    }
-
-    const secret = crypto.createHash('sha256').update(TELEGRAM_BOT_TOKEN).digest();
-    const dataCheckString = Object.keys(data)
-      .filter((key) => key !== 'hash')
-      .sort()
-      .map((key) => `${key}=${data[key]}`)
-      .join('\n');
-
-    const computedHash = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
-
-    if (computedHash !== hash) {
+    
+    // Проверяем данные
+    try {
+      verifyTelegramAuth(data);
+    } catch (error) {
       return res.status(401).json({
-        error: 'Не удалось подтвердить данные Telegram',
-      });
-    }
-
-    if (authDate && Date.now() / 1000 - Number(authDate) > 86400) {
-      return res.status(401).json({
-        error: 'Данные авторизации устарели, попробуйте ещё раз',
+        error: error.message,
       });
     }
 
@@ -596,12 +662,14 @@ app.post('/api/auth/telegram', async (req, res) => {
       provider: 'telegram',
     });
 
+    console.log('[Auth] Telegram auth (POST) - авторизация успешна');
+
     res.json({
       token,
       user,
     });
   } catch (error) {
-    console.error('Telegram auth error:', error);
+    console.error('[Auth] Telegram auth error:', error);
     res.status(500).json({
       error: 'Ошибка авторизации через Telegram',
       details: error.message,
