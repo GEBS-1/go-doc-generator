@@ -68,6 +68,7 @@ export async function apiFetch<TResponse = unknown>(
     ...rest,
     headers: baseHeaders,
     body: requestBody,
+    credentials: 'include', // Важно: отправляем cookie с каждым запросом
   });
 
   console.log('[apiFetch] Ответ:', {

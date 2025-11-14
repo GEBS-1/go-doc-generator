@@ -388,15 +388,26 @@ const verifyToken = (token) => {
 
 const requireAuth = async (req, res, next) => {
   try {
+    // Пытаемся получить токен из Authorization header (Bearer token)
+    let token = null;
     const header = req.headers.authorization || '';
     const parts = header.split(' ');
-    if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    if (parts.length === 2 && parts[0] === 'Bearer') {
+      token = parts[1];
+    }
+    
+    // Если токена нет в header, пытаемся получить из cookie (HTTP-only cookie)
+    if (!token && req.cookies && req.cookies.docugen_token) {
+      token = req.cookies.docugen_token;
+      console.log('[Auth] Токен получен из cookie');
+    }
+    
+    if (!token) {
       return res.status(401).json({
         error: 'Требуется авторизация',
       });
     }
 
-    const token = parts[1];
     const decoded = verifyToken(token);
 
     const user = await fetchUserWithSubscription(decoded.sub);
@@ -416,6 +427,7 @@ const requireAuth = async (req, res, next) => {
 
     return next();
   } catch (error) {
+    console.error('[Auth] Middleware error:', error);
     return res.status(401).json({
       error: 'Недействительный токен',
       details: error.message,
@@ -542,6 +554,10 @@ app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Поддержка cookie (для JWT токенов)
+const cookieParser = require('cookie-parser');
+app.use(cookieParser());
+
 app.get('/api/plans', (req, res) => {
   res.json({
     plans: Object.values(SUBSCRIPTION_PLANS).map((plan) => ({
@@ -618,10 +634,26 @@ app.get('/api/auth/telegram/callback', async (req, res) => {
       provider: 'telegram',
     });
 
-    console.log('[Auth] Telegram callback - авторизация успешна, перенаправление на фронтенд');
+    console.log('[Auth] Telegram callback - авторизация успешна, установка cookie и перенаправление');
 
-    // Перенаправляем на фронтенд с токеном в URL
-    // Фронтенд должен извлечь токен из URL и сохранить в localStorage
+    // Устанавливаем HTTP-only cookie с JWT токеном (безопаснее, чем localStorage)
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+    const cookieOptions = {
+      httpOnly: true, // Защита от XSS - JavaScript не может прочитать cookie
+      secure: isProduction, // Только HTTPS в production
+      sameSite: 'lax', // Защита от CSRF
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 дней
+      path: '/', // Доступна на всех путях
+    };
+
+    res.cookie('docugen_token', token, cookieOptions);
+    console.log('[Auth] Cookie установлена:', {
+      httpOnly: cookieOptions.httpOnly,
+      secure: cookieOptions.secure,
+      sameSite: cookieOptions.sameSite,
+    });
+
+    // Также передаем токен в URL для совместимости с фронтендом (если он использует localStorage)
     const redirectUrl = new URL(`${DEFAULT_FRONTEND_ORIGIN}/auth/callback`);
     redirectUrl.searchParams.set('token', token);
     redirectUrl.searchParams.set('success', 'true');
