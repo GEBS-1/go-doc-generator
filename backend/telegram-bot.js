@@ -223,7 +223,8 @@ const initTelegramBot = () => {
         
         // Генерируем временный токен для авторизации (как на poehali.dev)
         const authToken = await generateAuthToken(telegramId);
-        const authLink = `${frontendUrl}/auth?token=${authToken}`;
+        // Используем HashRouter для Render (URL с #)
+        const authLink = `${frontendUrl}/#/auth?token=${authToken}`;
         
         // Получаем данные пользователя с подпиской
         const user = await dbGet(
