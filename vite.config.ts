@@ -68,5 +68,7 @@ export default defineConfig(({ mode }) => ({
       },
     },
     chunkSizeWarningLimit: 1000, // Увеличиваем лимит предупреждений
+    // Копируем _redirects файл в dist для Render
+    copyPublicDir: true,
   },
 }));

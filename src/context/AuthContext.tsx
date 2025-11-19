@@ -14,6 +14,7 @@ interface AuthContextValue {
   logout: () => void;
   refreshProfile: () => Promise<void>;
   promptLogin: () => void;
+  applyAuthState: (auth: AuthResponse) => void;
 }
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -45,10 +46,20 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       userId: auth.user?.id,
       userName: auth.user?.name,
     });
+    
+    // Устанавливаем состояние синхронно
     setToken(auth.token);
     setUser(auth.user);
     localStorage.setItem(TOKEN_STORAGE_KEY, auth.token);
-    console.log('[AuthContext] Токен сохранен в localStorage');
+    
+    console.log('[AuthContext] Токен сохранен в localStorage и состояние обновлено:', {
+      tokenSet: !!auth.token,
+      userSet: !!auth.user,
+      userId: auth.user?.id,
+    });
+    
+    // Убеждаемся, что initializing сброшен
+    setInitializing(false);
   }, []);
 
   const clearAuthState = useCallback(() => {
@@ -209,8 +220,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       logout,
       refreshProfile,
       promptLogin: () => setAuthDialogOpen(true),
+      applyAuthState,
     }),
-    [user, token, effectiveLoading, logout, refreshProfile],
+    [user, token, effectiveLoading, logout, refreshProfile, applyAuthState],
   );
 
   return (

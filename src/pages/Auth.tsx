@@ -46,37 +46,41 @@ const Auth = () => {
       hasToken: !!token,
     });
 
-    apiFetch<AuthResponse>(apiPath, {
+    apiFetch<{ success: boolean; token: string; user: AuthResponse['user'] }>(apiPath, {
       method: "POST",
       body: { token },
     })
       .then((data) => {
         console.log("[Auth] Токен валидирован, авторизация успешна:", {
+          success: data?.success,
           hasToken: !!data?.token,
           hasUser: !!data?.user,
           userId: data?.user?.id,
         });
 
-        // Сохраняем токен в localStorage (для совместимости)
-        if (data.token) {
-          localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+        if (!data.token || !data.user) {
+          console.error("[Auth] Неполный ответ от сервера:", data);
+          setStatus("error");
+          setErrorMessage("Неполный ответ от сервера");
+          setTimeout(() => {
+            navigate("/");
+          }, 3000);
+          return;
         }
 
-        // Применяем состояние авторизации
-        if (data.token && data.user) {
-          applyAuthState({
-            token: data.token,
-            user: data.user,
-          });
-        }
+        // Применяем состояние авторизации (сохраняет токен и пользователя)
+        applyAuthState({
+          token: data.token,
+          user: data.user,
+        });
+
+        console.log("[Auth] Состояние авторизации применено, перенаправление...");
 
         setStatus("success");
 
-        // Перенаправляем на главную страницу
+        // Перенаправляем на главную страницу (без перезагрузки, чтобы сохранить состояние)
         setTimeout(() => {
-          navigate("/");
-          // Перезагружаем страницу чтобы AuthContext подхватил изменения
-          window.location.reload();
+          navigate("/", { replace: true });
         }, 1000);
       })
       .catch((error) => {
