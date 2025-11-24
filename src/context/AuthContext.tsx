@@ -140,7 +140,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       try {
         const auth = await apiFetch<AuthResponse>(path, {
           method: "POST",
-          body: payload,
+          body: payload as BodyInit,
         });
         console.log('[AuthContext] Авторизация успешна:', {
           hasToken: !!auth.token,
@@ -165,34 +165,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
     },
     [applyAuthState, handleAuthError],
-  );
-
-  const handleTelegramAuth = useCallback(
-    async (payload: TelegramAuthPayload) => {
-      console.log('[AuthContext] handleTelegramAuth вызван:', {
-        hasPayload: !!payload,
-        hasHash: !!payload?.hash,
-        userId: payload?.id,
-        firstName: payload?.first_name,
-        username: payload?.username,
-      });
-      
-      if (!payload?.hash) {
-        console.error('[AuthContext] ОШИБКА: hash отсутствует в payload!');
-        toast.error("Некорректный ответ от Telegram");
-        return;
-      }
-
-      console.log('[AuthContext] Вызываем authenticate("/api/auth/telegram", payload)...');
-      try {
-        await authenticate("/api/auth/telegram", payload);
-        console.log('[AuthContext] authenticate успешно завершен');
-      } catch (error) {
-        console.error('[AuthContext] ОШИБКА в authenticate:', error);
-        throw error;
-      }
-    },
-    [authenticate],
   );
 
   const logout = useCallback(() => {
@@ -233,9 +205,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         onOpenChange={setAuthDialogOpen}
         loading={effectiveLoading}
         telegramBotName={telegramBotName}
-        onTelegramAuth={handleTelegramAuth}
       />
     </AuthContext.Provider>
   );
 };
-
