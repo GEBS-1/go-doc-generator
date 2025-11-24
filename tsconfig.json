@@ -9,8 +9,9 @@
     "noImplicitAny": false,
     "noUnusedParameters": false,
     "skipLibCheck": true,
-    "allowJs": true,
+    "allowJs": false,
     "noUnusedLocals": false,
     "strictNullChecks": false
-  }
+  },
+  "exclude": ["backend", "node_modules", "dist"]
 }

@@ -700,6 +700,185 @@ export interface TableData {
 }
 
 /**
+ * Анализирует раздел и определяет, нужны ли таблицы/графики и какого типа
+ */
+export interface VisualAnalysis {
+  needsTable: boolean;
+  tableType?: TableType;
+  tablePriority: 'high' | 'medium' | 'low';
+  needsChart: boolean;
+  chartType?: 'line' | 'bar' | 'pie';
+  chartPriority: 'high' | 'medium' | 'low';
+  reason?: string;
+}
+
+export async function analyzeSectionForVisuals(
+  sectionTitle: string,
+  sectionDescription: string,
+  sectionContent?: string
+): Promise<VisualAnalysis> {
+  const titleLower = sectionTitle.toLowerCase();
+  const descLower = (sectionDescription || '').toLowerCase();
+  const contentLower = (sectionContent || '').toLowerCase();
+  const combinedText = `${titleLower} ${descLower} ${contentLower}`;
+
+  // Ключевые слова для определения типов таблиц
+  const comparativeKeywords = [
+    'сравнен', 'сопоставлен', 'анализ', 'оценка', 'противопостав',
+    'отличи', 'различи', 'сходств', 'аналоги', 'аналог'
+  ];
+  
+  const dynamicKeywords = [
+    'динамик', 'развитие', 'изменен', 'рост', 'снижен', 'увелич',
+    'уменьш', 'тренд', 'эволюц', 'истори', 'по годам', 'период',
+    'времен', 'прогресс', 'регресс', 'трансформац'
+  ];
+  
+  const classificationKeywords = [
+    'классификац', 'тип', 'вид', 'категори', 'групп', 'класс',
+    'разновидност', 'подход', 'метод', 'способ', 'вариант'
+  ];
+
+  // Ключевые слова для графиков
+  const chartKeywords = [
+    'график', 'диаграмм', 'визуализац', 'рисунок', 'иллюстрац',
+    'динамик', 'тренд', 'зависимост', 'корреляц', 'распределен',
+    'статистик', 'данные', 'показател', 'метрик', 'результат'
+  ];
+
+  const lineChartKeywords = [
+    'динамик', 'изменен', 'рост', 'снижен', 'тренд', 'эволюц',
+    'истори', 'по годам', 'период', 'времен', 'прогресс'
+  ];
+  
+  const barChartKeywords = [
+    'сравнен', 'сопоставлен', 'оценка', 'различи', 'отрасл',
+    'категори', 'групп', 'сегмент', 'компани', 'организац'
+  ];
+  
+  const pieChartKeywords = [
+    'распределен', 'доля', 'процент', 'состав', 'структур',
+    'пропорц', 'часть', 'вклад', 'удельный'
+  ];
+
+  // Определяем потребность в таблице
+  let needsTable = false;
+  let tableType: TableType = 'comparative';
+  let tablePriority: 'high' | 'medium' | 'low' = 'low';
+
+  // Высокий приоритет: явное упоминание таблиц в названии/описании
+  if (/таблиц/i.test(combinedText)) {
+    needsTable = true;
+    tablePriority = 'high';
+  }
+
+  // Определяем тип таблицы на основе ключевых слов
+  const hasComparative = comparativeKeywords.some(kw => combinedText.includes(kw));
+  const hasDynamic = dynamicKeywords.some(kw => combinedText.includes(kw));
+  const hasClassification = classificationKeywords.some(kw => combinedText.includes(kw));
+
+  if (!needsTable) {
+    // Средний приоритет: разделы по своей природе требуют таблиц
+    const tableRequiringSections = [
+      'сравнен', 'анализ', 'оценка', 'классификац', 'методолог',
+      'обзор', 'исследование', 'практик', 'результат'
+    ];
+    
+    const isTableSection = tableRequiringSections.some(kw => titleLower.includes(kw));
+    
+    if (isTableSection && (hasComparative || hasDynamic || hasClassification)) {
+      needsTable = true;
+      tablePriority = 'medium';
+    }
+  }
+
+  // Определяем тип таблицы
+  if (needsTable) {
+    if (hasDynamic && !hasComparative && !hasClassification) {
+      tableType = 'dynamic';
+    } else if (hasClassification && !hasComparative) {
+      tableType = 'classification';
+    } else {
+      tableType = 'comparative';
+    }
+  }
+
+  // Определяем потребность в графике
+  let needsChart = false;
+  let chartType: 'line' | 'bar' | 'pie' = 'line';
+  let chartPriority: 'high' | 'medium' | 'low' = 'low';
+
+  // Высокий приоритет: явное упоминание графиков
+  if (/график|диаграмм|рисунк/i.test(combinedText)) {
+    needsChart = true;
+    chartPriority = 'high';
+  }
+
+  // Средний приоритет: разделы с данными/статистикой
+  if (!needsChart) {
+    const chartRequiringKeywords = [
+      'статистик', 'данные', 'показател', 'метрик', 'результат',
+      'исследование', 'анализ', 'динамик', 'тренд'
+    ];
+    
+    const hasChartIndicators = chartRequiringKeywords.some(kw => combinedText.includes(kw));
+    const isDataSection = titleLower.includes('результат') || 
+                         titleLower.includes('исследован') ||
+                         titleLower.includes('анализ') ||
+                         titleLower.includes('статистик');
+    
+    if (hasChartIndicators || (isDataSection && chartKeywords.some(kw => combinedText.includes(kw)))) {
+      needsChart = true;
+      chartPriority = 'medium';
+    }
+  }
+
+  // Определяем тип графика
+  if (needsChart) {
+    const hasLine = lineChartKeywords.some(kw => combinedText.includes(kw));
+    const hasBar = barChartKeywords.some(kw => combinedText.includes(kw));
+    const hasPie = pieChartKeywords.some(kw => combinedText.includes(kw));
+
+    if (hasPie && !hasLine && !hasBar) {
+      chartType = 'pie';
+    } else if (hasBar && !hasLine) {
+      chartType = 'bar';
+    } else {
+      chartType = 'line'; // По умолчанию
+    }
+  }
+
+  // Исключения: разделы, где таблицы/графики не нужны
+  const excludeKeywords = ['введение', 'заключен', 'литератур', 'библиограф', 'содержани'];
+  const isExcluded = excludeKeywords.some(kw => titleLower.includes(kw));
+  
+  if (isExcluded) {
+    // В литературе может быть таблица, но не графики
+    if (titleLower.includes('литератур') || titleLower.includes('библиограф')) {
+      needsChart = false;
+    }
+    // Во введении и заключении обычно не нужны
+    if (titleLower.includes('введение') || titleLower.includes('заключен')) {
+      if (tablePriority !== 'high') {
+        needsTable = false;
+      }
+      if (chartPriority !== 'high') {
+        needsChart = false;
+      }
+    }
+  }
+
+  return {
+    needsTable,
+    tableType,
+    tablePriority,
+    needsChart,
+    chartType,
+    chartPriority
+  };
+}
+
+/**
  * Генерирует таблицу на основе темы и раздела
  */
 export async function generateTable(

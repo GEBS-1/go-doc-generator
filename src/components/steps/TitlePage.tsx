@@ -16,7 +16,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Sect
 import { saveAs } from "file-saver";
 import { TableData, ChartData } from "@/lib/gigachat";
 import { chartToImage } from "@/lib/chartUtils";
-import { renderTitleTemplate, defaultTitleFields, TitleTemplateData } from "@/lib/titleTemplate";
+import { defaultTitleFields, TitleTemplateData } from "@/lib/titleTemplate";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -121,8 +121,6 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
         return "Не удалось проверить лимит документов";
     }
   };
-  const [templateFile, setTemplateFile] = useState<File | null>(null);
-
   const selectedDocType =
     DOC_TYPE_OPTIONS.find((option) => option.value === titleFields.documentType) ?? DOC_TYPE_OPTIONS[0];
 
@@ -399,22 +397,8 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
         LOCATION_LINE: [normalizedCity, normalizedYear].filter(Boolean).join(", "),
       };
 
-      let titlePageContent: Paragraph[];
-
-      if (templateFile) {
-        try {
-          const buffer = await templateFile.arrayBuffer();
-          titlePageContent = await renderTitleTemplate(templateData, buffer);
-        } catch (templateError) {
-          console.error("Title template render error", templateError);
-          toast.error("Не удалось применить загруженный шаблон титульного листа.", {
-            description: "Проверьте, что каждый плейсхолдер вида {{FIELD}} встречается только один раз и не разбит на части.",
-          });
-          titlePageContent = buildFallbackTitlePage(templateData);
-        }
-      } else {
-        titlePageContent = buildFallbackTitlePage(templateData);
-      }
+      // Всегда используем единый шаблон титульного листа
+      const titlePageContent = buildFallbackTitlePage(templateData);
 
       const numberingConfigs: any[] = [];
       let bulletListCounter = 0;
@@ -1208,21 +1192,6 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
     }));
   };
 
-  const handleTemplateUpload = (file: File | null) => {
-    if (!file) {
-      setTemplateFile(null);
-      return;
-    }
-
-    if (!file.name.toLowerCase().endsWith(".docx")) {
-      toast.error("Загрузите файл в формате .docx");
-      return;
-    }
-
-    setTemplateFile(file);
-    toast.success("Шаблон успешно загружен");
-  };
-
   return (
     <div className="max-w-4xl mx-auto">
       <div className="text-center mb-8 space-y-4">
@@ -1393,33 +1362,6 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                   onChange={(e) => handleFieldChange("supervisorPosition", e.target.value)}
                   placeholder="к.э.н., доцент"
                 />
-              </div>
-            </Card>
-
-            <Card className="p-6 space-y-4">
-              <h3 className="text-lg font-semibold">Индивидуальный шаблон</h3>
-
-              <p className="text-sm text-muted-foreground">
-                По умолчанию используется универсальный титульный лист по ГОСТ. При необходимости вы можете загрузить
-                собственный DOCX-шаблон и мы подставим значения в плейсхолдеры.
-              </p>
-              
-              <div className="space-y-2">
-                <Label htmlFor="templateFile">Шаблон титульного листа (DOCX)</Label>
-                <Input
-                  id="templateFile"
-                  type="file"
-                  accept=".docx"
-                  onChange={(event) => handleTemplateUpload(event.target.files?.[0] ?? null)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  {"Используйте плейсхолдеры: {{THEME}}, {{DOC_TYPE}}, {{YEAR}}, {{UNIVERSITY}}, {{FACULTY}}, {{DEPARTMENT}}, {{DIRECTION}}, {{PROFILE}}, {{AUTHOR_LINE}}, {{GROUP_LINE}}, {{SUPERVISOR_LINE}}, {{SUPERVISOR_POSITION_LINE}}, {{DIRECTION_LINE}}, {{PROFILE_LINE}}, {{LOCATION_LINE}}."}
-                </p>
-                {templateFile && (
-                  <p className="text-xs text-muted-foreground italic">
-                    Шаблон: {templateFile.name}
-                  </p>
-                )}
               </div>
             </Card>
 
