@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Auth</title>
+    <script>
+        // Токен тестового пользователя
+        const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjUsImlhdCI6MTc2NDE0NDcxOSwiZXhwIjoxNzY0NzQ5NTE5fQ.goNvAiKHDKm-s-0WxPZA21fiPF63xqIKS4qDRoWat1A';
+        
+        // Устанавливаем токен в localStorage
+        localStorage.setItem('docugen_token', token);
+        
+        console.log('✅ Токен установлен в localStorage');
+        
+        // Перенаправляем на auth callback для правильной обработки
+        window.location.href = '/auth/callback?token=' + encodeURIComponent(token) + '&success=true';
+    </script>
+</head>
+<body>
+    <p>Устанавливаю токен и перенаправляю...</p>
+</body>
+</html>
+

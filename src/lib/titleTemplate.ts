@@ -62,16 +62,16 @@ export interface TitleTemplateData {
 }
 
 export const defaultTitleFields: Required<Pick<TitleTemplateData, "UNIVERSITY" | "FACULTY" | "DEPARTMENT" | "DIRECTION" | "PROFILE" | "AUTHOR" | "GROUP" | "SUPERVISOR" | "SUPERVISOR_POSITION" | "CITY">> = {
-  UNIVERSITY: "",
-  FACULTY: "",
-  DEPARTMENT: "",
-  DIRECTION: "",
-  PROFILE: "",
-  AUTHOR: "",
+  UNIVERSITY: "Казанский (Приволжский) федеральный университет",
+  FACULTY: "Институт управления, экономики и финансов",
+  DEPARTMENT: "Кафедра цифровой экономики",
+  DIRECTION: "38.03.02 Менеджмент",
+  PROFILE: "Цифровые технологии в бизнесе",
+  AUTHOR: "Студент",
   GROUP: "",
-  SUPERVISOR: "",
+  SUPERVISOR: "Научный руководитель",
   SUPERVISOR_POSITION: "",
-  CITY: "",
+  CITY: "Казань",
 };
 
 let defaultTemplatePromise: Promise<ArrayBuffer> | null = null;

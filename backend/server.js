@@ -665,6 +665,44 @@ app.get('/api/auth/telegram/callback', async (req, res) => {
   }
 });
 
+// Временный endpoint для тестирования - устанавливает токен тестового пользователя
+// Доступен только в development режиме
+if (process.env.NODE_ENV !== 'production' && !process.env.RENDER) {
+  app.get('/api/test/auth', async (req, res) => {
+    try {
+      // Проверяем, существует ли тестовый пользователь
+      const testUser = await dbGet('SELECT * FROM users WHERE telegram_id = ?', [999999999]);
+      
+      if (!testUser) {
+        return res.status(404).json({ error: 'Тестовый пользователь не найден. Запустите: node backend/create-test-user.js' });
+      }
+
+      const token = createToken({ sub: testUser.id });
+
+      // Устанавливаем cookie
+      const cookieOptions = {
+        httpOnly: true,
+        secure: false, // В development не требуется HTTPS
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 дней
+        path: '/',
+      };
+
+      res.cookie('docugen_token', token, cookieOptions);
+      
+      // Перенаправляем на главную с токеном в URL для совместимости
+      const redirectUrl = new URL(`${DEFAULT_FRONTEND_ORIGIN}/auth/callback`);
+      redirectUrl.searchParams.set('token', token);
+      redirectUrl.searchParams.set('success', 'true');
+
+      res.redirect(redirectUrl.toString());
+    } catch (error) {
+      console.error('[Test Auth] Ошибка:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+}
+
 // Endpoint для валидации временного токена от бота (как на poehali.dev)
 app.post('/api/auth/telegram-token', async (req, res) => {
   try {
