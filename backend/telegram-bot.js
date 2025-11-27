@@ -1,1 +1,678 @@
-﻿const TelegramBot = require('node-telegram-bot-api');const crypto = require('crypto');const { get: dbGet, run: dbRun, pool } = require('./db');let bot = null;let dbReady = false;// РџСЂРѕРІРµСЂСЏРµРј РіРѕС‚РѕРІРЅРѕСЃС‚СЊ Р±Р°Р·С‹ РґР°РЅРЅС‹С…const checkDbReady = async () => {  if (dbReady) return true;  try {    await pool.query('SELECT 1');    dbReady = true;    return true;  } catch (error) {    console.error('[Telegram Bot] Р‘Р°Р·Р° РґР°РЅРЅС‹С… РЅРµ РіРѕС‚РѕРІР°:', error.message);    return false;  }};// Р РµРіРёСЃС‚СЂР°С†РёСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РёР· РґР°РЅРЅС‹С… Telegram Р±РѕС‚Р°const registerUserFromTelegram = async (telegramUser) => {  const telegramId = telegramUser.id;  const firstName = telegramUser.first_name || null;  const lastName = telegramUser.last_name || null;  const fullName = [firstName, lastName].filter(Boolean).join(' ') || null;  const username = telegramUser.username || null;  // Р¤РѕС‚Рѕ РёР· Telegram Р±РѕС‚Р° РїРѕР»СѓС‡РёС‚СЊ СЃР»РѕР¶РЅРµРµ, РѕСЃС‚Р°РІР»СЏРµРј null  const photoUrl = null;  // РџСЂРѕРІРµСЂСЏРµРј, СЃСѓС‰РµСЃС‚РІСѓРµС‚ Р»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ  const existing = await dbGet('SELECT * FROM users WHERE telegram_id = ?', [telegramId]);  if (existing) {    // РћР±РЅРѕРІР»СЏРµРј РґР°РЅРЅС‹Рµ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ    await dbRun(      `UPDATE users       SET username = ?, first_name = ?, updated_at = CURRENT_TIMESTAMP       WHERE id = ?`,      [username, fullName, existing.id],    );    return { isNew: false, userId: existing.id };  }  // РЎРѕР·РґР°РµРј РЅРѕРІРѕРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ  const insertResult = await dbRun(    'INSERT INTO users (telegram_id, username, first_name, photo_url) VALUES (?, ?, ?, ?) RETURNING id',    [telegramId, username, fullName, photoUrl],  );  const newUserId = insertResult.lastID || insertResult.rows?.[0]?.id;  if (!newUserId) {    throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РЅРѕРІРѕРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ');  }  // РЎРѕР·РґР°РµРј Р±РµСЃРїР»Р°С‚РЅСѓСЋ РїРѕРґРїРёСЃРєСѓ  const now = new Date();  const resetDate = new Date(now);  resetDate.setMonth(resetDate.getMonth() + 1);  resetDate.setDate(1);  resetDate.setHours(0, 0, 0, 0);  await dbRun(    `INSERT INTO subscriptions (      user_id, plan, status, docs_generated, docs_limit, activated_at, reset_date, updated_at    ) VALUES (?, 'free', 'active', 0, 1, ?, ?, CURRENT_TIMESTAMP)`,    [newUserId, now.toISOString(), resetDate.toISOString()],  );  return { isNew: true, userId: newUserId };};// Р“РµРЅРµСЂР°С†РёСЏ РІСЂРµРјРµРЅРЅРѕРіРѕ С‚РѕРєРµРЅР° РґР»СЏ Р°РІС‚РѕСЂРёР·Р°С†РёРё (РєР°Рє РЅР° poehali.dev)const generateAuthToken = async (telegramId) => {  // Р“РµРЅРµСЂРёСЂСѓРµРј UUID С‚РѕРєРµРЅ  const token = crypto.randomUUID();    // РўРѕРєРµРЅ РІР°Р»РёРґРµРЅ 5 РјРёРЅСѓС‚  const expiresAt = new Date();  expiresAt.setMinutes(expiresAt.getMinutes() + 5);    // РЎРѕС…СЂР°РЅСЏРµРј С‚РѕРєРµРЅ РІ Р‘Р”  await dbRun(    `INSERT INTO auth_tokens (token, telegram_id, expires_at)      VALUES (?, ?, ?)`,    [token, telegramId, expiresAt.toISOString()]  );    console.log('[Telegram Bot] РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅ С‚РѕРєРµРЅ Р°РІС‚РѕСЂРёР·Р°С†РёРё:', {    token: token.substring(0, 8) + '...',    telegramId,    expiresAt: expiresAt.toISOString(),  });    return token;};// РџСЂРѕРІРµСЂСЏРµРј, РІР°Р»РёРґРµРЅ Р»Рё URL РґР»СЏ Telegram (РЅРµ localhost)const isValidTelegramUrl = (url) => {  if (!url) return false;  try {    const urlObj = new URL(url);    // Telegram РЅРµ РїСЂРёРЅРёРјР°РµС‚ localhost, 127.0.0.1, РёР»Рё IP Р°РґСЂРµСЃР°    const hostname = urlObj.hostname.toLowerCase();    return (      (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') &&      !hostname.includes('localhost') &&      !hostname.includes('127.0.0.1') &&      !hostname.match(/^\d+\.\d+\.\d+\.\d+$/) &&      !hostname.includes('::1')    );  } catch {    return false;  }};const initTelegramBot = () => {  const token = process.env.TELEGRAM_BOT_TOKEN;  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';  if (!token) {    console.warn('[Telegram Bot] TELEGRAM_BOT_TOKEN РЅРµ Р·Р°РґР°РЅ. Р‘РѕС‚ РЅРµ Р±СѓРґРµС‚ Р·Р°РїСѓС‰РµРЅ.');    return null;  }  try {    // РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРё РѕРїСЂРµРґРµР»СЏРµРј, РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ Р»Рё webhook    // Р’ production (Render) РёСЃРїРѕР»СЊР·СѓРµРј webhook, Р»РѕРєР°Р»СЊРЅРѕ - polling    const isProduction = process.env.NODE_ENV === 'production' ||                          process.env.RENDER === 'true' ||                         process.env.TELEGRAM_USE_WEBHOOK === 'true';        if (isProduction) {      // Production: РёСЃРїРѕР»СЊР·СѓРµРј webhook      bot = new TelegramBot(token, { polling: false });      console.log('[Telegram Bot] Р РµР¶РёРј: Webhook (production)');            // РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј webhook РїСЂРё СЃС‚Р°СЂС‚Рµ      // РСЃРїРѕР»СЊР·СѓРµРј URL backend СЃРµСЂРІРёСЃР°, РЅРµ frontend      const backendUrl = process.env.BACKEND_URL ||                         process.env.RENDER_EXTERNAL_URL ||                        'https://go-doc-generator-backend.onrender.com';      const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL ||                         `${backendUrl.replace(/\/$/, '')}/api/telegram/webhook`;            bot.setWebHook(webhookUrl)        .then(() => {          console.log(`[Telegram Bot] Webhook СѓСЃС‚Р°РЅРѕРІР»РµРЅ: ${webhookUrl}`);        })        .catch((error) => {          console.error('[Telegram Bot] РћС€РёР±РєР° СѓСЃС‚Р°РЅРѕРІРєРё webhook:', error.message);        });    } else {      // Development: РёСЃРїРѕР»СЊР·СѓРµРј polling      bot = new TelegramBot(token, { polling: true });      console.log('[Telegram Bot] Р РµР¶РёРј: Polling (development)');    }    // РћР±СЂР°Р±РѕС‚РєР° РѕС€РёР±РѕРє polling (409 Conflict)    bot.on('polling_error', (error) => {      // РРіРЅРѕСЂРёСЂСѓРµРј РѕС€РёР±РєСѓ 409 - СЌС‚Рѕ РЅРѕСЂРјР°Р»СЊРЅРѕ РїСЂРё РїРµСЂРµР·Р°РїСѓСЃРєРµ РёР»Рё РЅРµСЃРєРѕР»СЊРєРёС… СЌРєР·РµРјРїР»СЏСЂР°С…      if (error.code === 'ETELEGRAM' && error.response?.body?.error_code === 409) {        console.warn('[Telegram Bot] Polling РєРѕРЅС„Р»РёРєС‚ (409) - РґСЂСѓРіРѕР№ СЌРєР·РµРјРїР»СЏСЂ Р±РѕС‚Р° Р°РєС‚РёРІРµРЅ. Р­С‚Рѕ РЅРѕСЂРјР°Р»СЊРЅРѕ РїСЂРё РїРµСЂРµР·Р°РїСѓСЃРєРµ.');        return;      }      // Р”Р»СЏ РґСЂСѓРіРёС… РѕС€РёР±РѕРє Р»РѕРіРёСЂСѓРµРј      console.error('[Telegram Bot] Polling error:', error.message);    });    // РћР±СЂР°Р±РѕС‚РєР° Р»СЋР±РѕРіРѕ СЃРѕРѕР±С‰РµРЅРёСЏ РґР»СЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРѕР№ СЂРµРіРёСЃС‚СЂР°С†РёРё    bot.on('message', async (msg) => {      // РџСЂРѕРїСѓСЃРєР°РµРј РєРѕРјР°РЅРґС‹, РѕРЅРё РѕР±СЂР°Р±Р°С‚С‹РІР°СЋС‚СЃСЏ РѕС‚РґРµР»СЊРЅРѕ      if (msg.text && msg.text.startsWith('/')) {        return;      }      const chatId = msg.chat.id;      const telegramId = msg.from.id;      try {        const isReady = await checkDbReady();        if (!isReady) return;        // РџСЂРѕРІРµСЂСЏРµРј, Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅ Р»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ        const user = await dbGet('SELECT * FROM users WHERE telegram_id = ?', [telegramId]);                if (!user) {          // РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЂРµРіРёСЃС‚СЂРёСЂСѓРµРј РїСЂРё РїРµСЂРІРѕРј СЃРѕРѕР±С‰РµРЅРёРё          await registerUserFromTelegram(msg.from);          const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';                    await bot.sendMessage(            chatId,            `рџЋ‰ Р”РѕР±СЂРѕ РїРѕР¶Р°Р»РѕРІР°С‚СЊ РІ DocuGen!\n\n` +            `вњ… Р’С‹ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅС‹!\n\n` +            `рџ“ќ РСЃРїРѕР»СЊР·СѓР№С‚Рµ РєРѕРјР°РЅРґСѓ /start РґР»СЏ СѓРїСЂР°РІР»РµРЅРёСЏ РїРѕРґРїРёСЃРєРѕР№ Рё РїРѕР»СѓС‡РµРЅРёСЏ РёРЅС„РѕСЂРјР°С†РёРё.\n\n` +            `рџЊђ РћС‚РєСЂРѕР№С‚Рµ СЃР°Р№С‚: ${frontendUrl}`,          );        }      } catch (error) {        console.error('[Telegram Bot] Error in message handler:', error);      }    });    // РћР±СЂР°Р±РѕС‚РєР° РєРѕРјР°РЅРґС‹ /start    bot.onText(/\/start/, async (msg) => {      const chatId = msg.chat.id;      const telegramId = msg.from.id;      try {        // РџСЂРѕРІРµСЂСЏРµРј РіРѕС‚РѕРІРЅРѕСЃС‚СЊ Р±Р°Р·С‹ РґР°РЅРЅС‹С…        const isReady = await checkDbReady();        if (!isReady) {          await bot.sendMessage(            chatId,            'вЏі Р‘Р°Р·Р° РґР°РЅРЅС‹С… РµС‰Рµ РЅРµ РіРѕС‚РѕРІР°. РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РїРѕРїСЂРѕР±СѓР№С‚Рµ С‡РµСЂРµР· РЅРµСЃРєРѕР»СЊРєРѕ СЃРµРєСѓРЅРґ.',          );          return;        }        // РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЂРµРіРёСЃС‚СЂРёСЂСѓРµРј РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ, РµСЃР»Рё РµРіРѕ РЅРµС‚        const registrationResult = await registerUserFromTelegram(msg.from);                // Р“РµРЅРµСЂРёСЂСѓРµРј РІСЂРµРјРµРЅРЅС‹Р№ С‚РѕРєРµРЅ РґР»СЏ Р°РІС‚РѕСЂРёР·Р°С†РёРё (РєР°Рє РЅР° poehali.dev)        const authToken = await generateAuthToken(telegramId);        // РСЃРїРѕР»СЊР·СѓРµРј HashRouter РґР»СЏ Render (URL СЃ #)        const authLink = `${frontendUrl}/#/auth?token=${authToken}`;                // РџРѕР»СѓС‡Р°РµРј РґР°РЅРЅС‹Рµ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ СЃ РїРѕРґРїРёСЃРєРѕР№        const user = await dbGet(          `SELECT u.*, s.plan, s.status, s.docs_generated, s.docs_limit           FROM users u           LEFT JOIN subscriptions s ON u.id = s.user_id           WHERE u.telegram_id = ?`,          [telegramId]        );        const keyboard = [];        // Р”РѕР±Р°РІР»СЏРµРј РєРЅРѕРїРєСѓ СЃ СЃСЃС‹Р»РєРѕР№ РґР»СЏ Р°РІС‚РѕСЂРёР·Р°С†РёРё        keyboard.push([{ text: 'рџ”ђ Р’РѕР№С‚Рё РЅР° СЃР°Р№С‚', url: authLink }]);        if (registrationResult.isNew) {          // РќРѕРІС‹Р№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ - РїСЂРёРІРµС‚СЃС‚РІРёРµ СЃ СЂРµРіРёСЃС‚СЂР°С†РёРµР№          const planInfo = user?.plan             ? `\nрџ“¦ РўР°СЂРёС„: ${user.plan}\n`             : '\nрџ“¦ РўР°СЂРёС„: Р‘РµСЃРїР»Р°С‚РЅС‹Р№\n';          await bot.sendMessage(            chatId,            `рџЋ‰ Р”РѕР±СЂРѕ РїРѕР¶Р°Р»РѕРІР°С‚СЊ РІ DocuGen, ${msg.from.first_name || 'РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ'}!\n\n` +            `вњ… Р’С‹ СѓСЃРїРµС€РЅРѕ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅС‹!${planInfo}\n\n` +            `рџ”ђ РќР°Р¶РјРёС‚Рµ РєРЅРѕРїРєСѓ РЅРёР¶Рµ, С‡С‚РѕР±С‹ РІРѕР№С‚Рё РЅР° СЃР°Р№С‚:\n` +            `(РЎСЃС‹Р»РєР° РґРµР№СЃС‚РІРёС‚РµР»СЊРЅР° 5 РјРёРЅСѓС‚)\n\n` +            `рџ“ќ РџРѕСЃР»Рµ РІС…РѕРґР° РІС‹ СЃРјРѕР¶РµС‚Рµ:\n` +            `вЂў Р“РµРЅРµСЂРёСЂРѕРІР°С‚СЊ РґРѕРєСѓРјРµРЅС‚С‹ РїРѕ Р“РћРЎРў\n` +            `вЂў РСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РєРѕРјР°РЅРґС‹ Р±РѕС‚Р° РґР»СЏ СѓРїСЂР°РІР»РµРЅРёСЏ РїРѕРґРїРёСЃРєРѕР№\n` +            `вЂў РћС‚СЃР»РµР¶РёРІР°С‚СЊ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ РґРѕРєСѓРјРµРЅС‚РѕРІ\n\n` +            `РСЃРїРѕР»СЊР·СѓР№С‚Рµ РєРѕРјР°РЅРґС‹:\n` +            `/subscription - СЃС‚Р°С‚СѓСЃ РїРѕРґРїРёСЃРєРё\n` +            `/usage - РёСЃРїРѕР»СЊР·РѕРІР°РЅРѕ РґРѕРєСѓРјРµРЅС‚РѕРІ\n` +            `/upgrade - РєСѓРїРёС‚СЊ РїРѕРґРїРёСЃРєСѓ`,            {              reply_markup: {                inline_keyboard: keyboard,              },            }          );        } else {          // РЎСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ          const planInfo = user?.plan             ? `\nрџ“¦ РўР°СЂРёС„: ${user.plan}\n`             : '\nрџ“¦ РўР°СЂРёС„: Р‘РµСЃРїР»Р°С‚РЅС‹Р№\n';          await bot.sendMessage(            chatId,            `рџ‘‹ РџСЂРёРІРµС‚, ${msg.from.first_name || 'РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ'}!\n\n` +            `вњ… Р’С‹ СѓР¶Рµ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅС‹ РІ DocuGen!${planInfo}\n\n` +            `рџ”ђ РќР°Р¶РјРёС‚Рµ РєРЅРѕРїРєСѓ РЅРёР¶Рµ, С‡С‚РѕР±С‹ РІРѕР№С‚Рё РЅР° СЃР°Р№С‚:\n` +            `(РЎСЃС‹Р»РєР° РґРµР№СЃС‚РІРёС‚РµР»СЊРЅР° 5 РјРёРЅСѓС‚)\n\n` +            `рџ“ќ РСЃРїРѕР»СЊР·СѓР№С‚Рµ РєРѕРјР°РЅРґС‹:\n` +            `/subscription - СЃС‚Р°С‚СѓСЃ РїРѕРґРїРёСЃРєРё\n` +            `/usage - РёСЃРїРѕР»СЊР·РѕРІР°РЅРѕ РґРѕРєСѓРјРµРЅС‚РѕРІ\n` +            `/upgrade - РєСѓРїРёС‚СЊ РїРѕРґРїРёСЃРєСѓ`,            {              reply_markup: {                inline_keyboard: keyboard,              },            }          );        }      } catch (error) {        console.error('[Telegram Bot] Error in /start:', error);        console.error('[Telegram Bot] Error stack:', error.stack);        console.error('[Telegram Bot] Error details:', {          message: error.message,          code: error.code,          telegramId,          chatId,        });        try {          await bot.sendMessage(            chatId,            `вќЊ РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°: ${error.message}\n\nРџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ РёР»Рё РѕР±СЂР°С‚РёС‚РµСЃСЊ РІ РїРѕРґРґРµСЂР¶РєСѓ.`,          );        } catch (sendError) {          console.error('[Telegram Bot] Failed to send error message:', sendError);        }      }    });    // РћР±СЂР°Р±РѕС‚РєР° РєРѕРјР°РЅРґС‹ /subscription    bot.onText(/\/subscription/, async (msg) => {      const chatId = msg.chat.id;      const telegramId = msg.from.id;      try {        const user = await dbGet(          `SELECT u.*, s.plan, s.status, s.docs_generated, s.docs_limit, s.expires_at, s.activated_at           FROM users u           LEFT JOIN subscriptions s ON u.id = s.user_id           WHERE u.telegram_id = ?`,          [telegramId]        );        if (!user) {          const keyboard = [];          if (isValidTelegramUrl(frontendUrl)) {            keyboard.push([{ text: 'рџЊђ РћС‚РєСЂС‹С‚СЊ СЃР°Р№С‚', url: frontendUrl }]);          }          await bot.sendMessage(            chatId,            'вќЊ Р’С‹ РЅРµ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅС‹. РђРІС‚РѕСЂРёР·СѓР№С‚РµСЃСЊ РЅР° СЃР°Р№С‚Рµ С‡РµСЂРµР· Telegram Login Widget.\n\n' +            `рџЊђ РћС‚РєСЂС‹С‚СЊ СЃР°Р№С‚: ${frontendUrl}`,            {              reply_markup: keyboard.length > 0 ? {                inline_keyboard: keyboard,              } : undefined,            }          );          return;        }        if (!user.plan) {          const keyboard = [];          const upgradeUrl = `${frontendUrl}/generator`;          if (isValidTelegramUrl(upgradeUrl)) {            keyboard.push([{ text: 'рџ’і РљСѓРїРёС‚СЊ РїРѕРґРїРёСЃРєСѓ', url: upgradeUrl }]);          }          await bot.sendMessage(            chatId,            'рџ“Љ РЈ РІР°СЃ РЅРµС‚ Р°РєС‚РёРІРЅРѕР№ РїРѕРґРїРёСЃРєРё.\n\n' +            'рџ’Ў РћС„РѕСЂРјРёС‚Рµ РїРѕРґРїРёСЃРєСѓ РґР»СЏ РіРµРЅРµСЂР°С†РёРё РґРѕРєСѓРјРµРЅС‚РѕРІ:\n' +            `рџЊђ РћС‚РєСЂС‹С‚СЊ СЃР°Р№С‚: ${frontendUrl}`,            {              reply_markup: keyboard.length > 0 ? {                inline_keyboard: keyboard,              } : undefined,            }          );          return;        }        const planNames = {          free: 'Р‘РµСЃРїР»Р°С‚РЅС‹Р№',          basic: 'Р‘Р°Р·РѕРІС‹Р№',          premium: 'РџСЂРµРјРёСѓРј',          single: 'Р Р°Р·РѕРІС‹Р№ РґРѕРєСѓРјРµРЅС‚',        };        const planName = planNames[user.plan] || user.plan;        const statusEmoji = user.status === 'active' ? 'вњ…' : 'вќЊ';        const limitText = user.docs_limit == null ? 'в€ћ' : `${user.docs_limit}`;        const usedText = `${user.docs_generated} / ${limitText}`;        const expiresText = user.expires_at          ? new Date(user.expires_at).toLocaleDateString('ru-RU')          : 'РќРµ РѕРіСЂР°РЅРёС‡РµРЅР°';        const keyboard = [];        const upgradeUrl = `${frontendUrl}/generator`;        if (isValidTelegramUrl(upgradeUrl)) {          keyboard.push([{ text: 'рџ’і РћР±РЅРѕРІРёС‚СЊ РїРѕРґРїРёСЃРєСѓ', url: upgradeUrl }]);        }        await bot.sendMessage(          chatId,          `рџ“Љ РЎС‚Р°С‚СѓСЃ РїРѕРґРїРёСЃРєРё\n\n` +          `рџ“¦ РўР°СЂРёС„: ${planName}\n` +          `РЎС‚Р°С‚СѓСЃ: ${statusEmoji} ${user.status === 'active' ? 'РђРєС‚РёРІРЅР°' : 'РќРµР°РєС‚РёРІРЅР°'}\n` +          `рџ“„ РСЃРїРѕР»СЊР·РѕРІР°РЅРѕ: ${usedText}\n` +          `рџ“… РСЃС‚РµРєР°РµС‚: ${expiresText}\n` +          (user.activated_at ? `рџ•ђ РђРєС‚РёРІРёСЂРѕРІР°РЅР°: ${new Date(user.activated_at).toLocaleDateString('ru-RU')}` : ''),          {            reply_markup: keyboard.length > 0 ? {              inline_keyboard: keyboard,            } : undefined,          }        );      } catch (error) {        console.error('[Telegram Bot] Error in /subscription:', error);        await bot.sendMessage(chatId, 'вќЊ РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.');      }    });    // РћР±СЂР°Р±РѕС‚РєР° РєРѕРјР°РЅРґС‹ /usage    bot.onText(/\/usage/, async (msg) => {      const chatId = msg.chat.id;      const telegramId = msg.from.id;      try {        const user = await dbGet(          `SELECT u.id, u.telegram_id, s.docs_generated, s.docs_limit, s.reset_date           FROM users u           LEFT JOIN subscriptions s ON u.id = s.user_id           WHERE u.telegram_id = ?`,          [telegramId]        );        if (!user) {          await bot.sendMessage(chatId, 'вќЊ Р’С‹ РЅРµ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅС‹.');          return;        }        const limitText = user.docs_limit == null ? 'в€ћ' : `${user.docs_limit}`;        const usedText = `${user.docs_generated || 0} / ${limitText}`;        const resetText = user.reset_date          ? new Date(user.reset_date).toLocaleDateString('ru-RU')          : 'РќРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅР°';        const keyboard = [];        const upgradeUrl = `${frontendUrl}/generator`;        if (isValidTelegramUrl(upgradeUrl)) {          keyboard.push([{ text: 'рџ’і РћР±РЅРѕРІРёС‚СЊ РїРѕРґРїРёСЃРєСѓ', url: upgradeUrl }]);        }        await bot.sendMessage(          chatId,          `рџ“Љ РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ РґРѕРєСѓРјРµРЅС‚РѕРІ\n\n` +          `рџ“„ РСЃРїРѕР»СЊР·РѕРІР°РЅРѕ: ${usedText}\n` +          `рџ”„ РЎР±СЂРѕСЃ Р»РёРјРёС‚Р°: ${resetText}\n\n` +          (user.docs_limit != null && user.docs_generated >= user.docs_limit            ? 'вљ пёЏ Р›РёРјРёС‚ РёСЃС‡РµСЂРїР°РЅ. РћР±РЅРѕРІРёС‚Рµ РїРѕРґРїРёСЃРєСѓ РґР»СЏ РїСЂРѕРґРѕР»Р¶РµРЅРёСЏ СЂР°Р±РѕС‚С‹.'            : 'вњ… Р›РёРјРёС‚ РЅРµ РёСЃС‡РµСЂРїР°РЅ.'),          {            reply_markup: keyboard.length > 0 ? {              inline_keyboard: keyboard,            } : undefined,          }        );      } catch (error) {        console.error('[Telegram Bot] Error in /usage:', error);        await bot.sendMessage(chatId, 'вќЊ РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.');      }    });    // РћР±СЂР°Р±РѕС‚РєР° РєРѕРјР°РЅРґС‹ /upgrade    bot.onText(/\/upgrade/, async (msg) => {      const chatId = msg.chat.id;      const keyboard = [];      const upgradeUrl = `${frontendUrl}/generator`;      if (isValidTelegramUrl(upgradeUrl)) {        keyboard.push([{ text: 'рџ’і РљСѓРїРёС‚СЊ РїРѕРґРїРёСЃРєСѓ', url: upgradeUrl }]);      }      await bot.sendMessage(        chatId,        'рџ’і РћР±РЅРѕРІР»РµРЅРёРµ РїРѕРґРїРёСЃРєРё\n\n' +        'Р’С‹Р±РµСЂРёС‚Рµ С‚Р°СЂРёС„ РЅР° СЃР°Р№С‚Рµ:\n' +        `рџЊђ РћС‚РєСЂС‹С‚СЊ СЃР°Р№С‚: ${frontendUrl}`,        {          reply_markup: keyboard.length > 0 ? {            inline_keyboard: keyboard,          } : undefined,        }      );    });    // РћР±СЂР°Р±РѕС‚РєР° callback РєРЅРѕРїРѕРє    bot.on('callback_query', async (query) => {      const chatId = query.message.chat.id;      const data = query.data;      if (data === 'subscription') {        // РўСЂРёРіРіРµСЂРёРј РєРѕРјР°РЅРґСѓ /subscription        const msg = { ...query.message, text: '/subscription', from: query.from };        bot.emit('text', msg);      }      await bot.answerCallbackQuery(query.id);    });    console.log('[Telegram Bot] Р‘РѕС‚ СѓСЃРїРµС€РЅРѕ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ');    return bot;  } catch (error) {    console.error('[Telegram Bot] РћС€РёР±РєР° РёРЅРёС†РёР°Р»РёР·Р°С†РёРё:', error.message);    return null;  }};/** * РћС‚РїСЂР°РІРєР° СѓРІРµРґРѕРјР»РµРЅРёСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ */const sendNotification = async (telegramId, message, options = {}) => {  if (!bot) {    console.warn('[Telegram Bot] Р‘РѕС‚ РЅРµ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ, СѓРІРµРґРѕРјР»РµРЅРёРµ РЅРµ РѕС‚РїСЂР°РІР»РµРЅРѕ');    return false;  }  try {    await bot.sendMessage(telegramId, message, options);    return true;  } catch (error) {    console.error(`[Telegram Bot] РћС€РёР±РєР° РѕС‚РїСЂР°РІРєРё СѓРІРµРґРѕРјР»РµРЅРёСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ ${telegramId}:`, error.message);    return false;  }};/** * РЈРІРµРґРѕРјР»РµРЅРёРµ РѕР± СѓСЃРїРµС€РЅРѕР№ РѕРїР»Р°С‚Рµ */const notifyPaymentSuccess = async (userId, planName) => {  try {    const user = await dbGet('SELECT telegram_id FROM users WHERE id = ?', [userId]);    if (!user || !user.telegram_id) {      return false;    }    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';    const keyboard = [];    if (isValidTelegramUrl(frontendUrl)) {      keyboard.push([{ text: 'рџЊђ РћС‚РєСЂС‹С‚СЊ СЃР°Р№С‚', url: frontendUrl }]);    }    return await sendNotification(      user.telegram_id,      `вњ… РћРїР»Р°С‚Р° СѓСЃРїРµС€РЅР°!\n\n` +      `Р’Р°С€Р° РїРѕРґРїРёСЃРєР° "${planName}" Р°РєС‚РёРІРёСЂРѕРІР°РЅР°.\n\n` +      `РўРµРїРµСЂСЊ РІС‹ РјРѕР¶РµС‚Рµ РіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РґРѕРєСѓРјРµРЅС‚С‹ Р±РµР· РѕРіСЂР°РЅРёС‡РµРЅРёР№.`,      {        reply_markup: keyboard.length > 0 ? {          inline_keyboard: keyboard,        } : undefined,      }    );  } catch (error) {    console.error('[Telegram Bot] Error in notifyPaymentSuccess:', error);    return false;  }};/** * РЈРІРµРґРѕРјР»РµРЅРёРµ Рѕ РіРµРЅРµСЂР°С†РёРё РґРѕРєСѓРјРµРЅС‚Р° */const notifyDocumentGenerated = async (userId, documentName) => {  try {    const user = await dbGet(      `SELECT u.telegram_id, s.docs_generated, s.docs_limit       FROM users u       LEFT JOIN subscriptions s ON u.id = s.user_id       WHERE u.id = ?`,      [userId]    );    if (!user || !user.telegram_id) {      return false;    }    const limitText = user.docs_limit == null ? 'в€ћ' : `${user.docs_limit}`;    const usedText = `${user.docs_generated || 0} / ${limitText}`;    return await sendNotification(      user.telegram_id,      `рџ“„ Р”РѕРєСѓРјРµРЅС‚ СЃРіРµРЅРµСЂРёСЂРѕРІР°РЅ!\n\n` +      `РќР°Р·РІР°РЅРёРµ: ${documentName}\n` +      `РСЃРїРѕР»СЊР·РѕРІР°РЅРѕ: ${usedText}`,    );  } catch (error) {    console.error('[Telegram Bot] Error in notifyDocumentGenerated:', error);    return false;  }};/** * РЈРІРµРґРѕРјР»РµРЅРёРµ РѕР± РёСЃС‚РµС‡РµРЅРёРё РїРѕРґРїРёСЃРєРё */const notifySubscriptionExpiring = async (userId, daysLeft) => {  try {    const user = await dbGet('SELECT telegram_id FROM users WHERE id = ?', [userId]);    if (!user || !user.telegram_id) {      return false;    }    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';    const keyboard = [];    const upgradeUrl = `${frontendUrl}/generator`;    if (isValidTelegramUrl(upgradeUrl)) {      keyboard.push([{ text: 'рџ’і РћР±РЅРѕРІРёС‚СЊ РїРѕРґРїРёСЃРєСѓ', url: upgradeUrl }]);    }    return await sendNotification(      user.telegram_id,      `вљ пёЏ РџРѕРґРїРёСЃРєР° РёСЃС‚РµРєР°РµС‚ С‡РµСЂРµР· ${daysLeft} ${daysLeft === 1 ? 'РґРµРЅСЊ' : daysLeft < 5 ? 'РґРЅСЏ' : 'РґРЅРµР№'}!\n\n` +      `РћР±РЅРѕРІРёС‚Рµ РїРѕРґРїРёСЃРєСѓ, С‡С‚РѕР±С‹ РїСЂРѕРґРѕР»Р¶РёС‚СЊ РїРѕР»СЊР·РѕРІР°С‚СЊСЃСЏ СЃРµСЂРІРёСЃРѕРј.`,      {        reply_markup: keyboard.length > 0 ? {          inline_keyboard: keyboard,        } : undefined,      }    );  } catch (error) {    console.error('[Telegram Bot] Error in notifySubscriptionExpiring:', error);    return false;  }};/** * РЈРІРµРґРѕРјР»РµРЅРёРµ Рѕ СЂРµРіРёСЃС‚СЂР°С†РёРё РЅРѕРІРѕРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ */const notifyUserRegistered = async (telegramId, firstName) => {  try {    if (!bot) {      console.warn('[Telegram Bot] Р‘РѕС‚ РЅРµ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ, СѓРІРµРґРѕРјР»РµРЅРёРµ Рѕ СЂРµРіРёСЃС‚СЂР°С†РёРё РЅРµ РѕС‚РїСЂР°РІР»РµРЅРѕ');      return false;    }    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';    const keyboard = [];    if (isValidTelegramUrl(frontendUrl)) {      keyboard.push([{ text: 'рџЊђ РћС‚РєСЂС‹С‚СЊ СЃР°Р№С‚', url: frontendUrl }]);    }    keyboard.push([      { text: 'рџ“Љ РЎС‚Р°С‚СѓСЃ РїРѕРґРїРёСЃРєРё', callback_data: 'subscription' },      { text: 'рџ“„ РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ', callback_data: 'usage' },    ]);    return await sendNotification(      telegramId,      `рџЋ‰ Р”РѕР±СЂРѕ РїРѕР¶Р°Р»РѕРІР°С‚СЊ РІ DocuGen, ${firstName || 'РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ'}!\n\n` +      `вњ… Р’С‹ СѓСЃРїРµС€РЅРѕ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅС‹!\n\n` +      `рџ“ќ РўРµРїРµСЂСЊ РІС‹ РјРѕР¶РµС‚Рµ:\n` +      `вЂў Р“РµРЅРµСЂРёСЂРѕРІР°С‚СЊ РґРѕРєСѓРјРµРЅС‚С‹ РїРѕ Р“РћРЎРў\n` +      `вЂў РСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РєРѕРјР°РЅРґС‹ Р±РѕС‚Р° РґР»СЏ СѓРїСЂР°РІР»РµРЅРёСЏ РїРѕРґРїРёСЃРєРѕР№\n` +      `вЂў РћС‚СЃР»РµР¶РёРІР°С‚СЊ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ РґРѕРєСѓРјРµРЅС‚РѕРІ\n\n` +      `РСЃРїРѕР»СЊР·СѓР№С‚Рµ РєРѕРјР°РЅРґС‹:\n` +      `/subscription - СЃС‚Р°С‚СѓСЃ РїРѕРґРїРёСЃРєРё\n` +      `/usage - РёСЃРїРѕР»СЊР·РѕРІР°РЅРѕ РґРѕРєСѓРјРµРЅС‚РѕРІ\n` +      `/upgrade - РєСѓРїРёС‚СЊ РїРѕРґРїРёСЃРєСѓ`,      {        reply_markup: keyboard.length > 0 ? {          inline_keyboard: keyboard,        } : undefined,      }    );  } catch (error) {    console.error('[Telegram Bot] Error in notifyUserRegistered:', error);    return false;  }};module.exports = {  initTelegramBot,  sendNotification,  notifyPaymentSuccess,  notifyDocumentGenerated,  notifySubscriptionExpiring,  notifyUserRegistered,  getBot: () => bot,};
+const TelegramBot = require('node-telegram-bot-api');
+const crypto = require('crypto');
+const { get: dbGet, run: dbRun, pool } = require('./db');
+
+let bot = null;
+let dbReady = false;
+
+// Проверяем готовность базы данных
+const checkDbReady = async () => {
+  if (dbReady) return true;
+  try {
+    await pool.query('SELECT 1');
+    dbReady = true;
+    return true;
+  } catch (error) {
+    console.error('[Telegram Bot] База данных не готова:', error.message);
+    return false;
+  }
+};
+
+// Регистрация пользователя из данных Telegram бота
+const registerUserFromTelegram = async (telegramUser) => {
+  const telegramId = telegramUser.id;
+  const firstName = telegramUser.first_name || null;
+  const lastName = telegramUser.last_name || null;
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || null;
+  const username = telegramUser.username || null;
+  // Фото из Telegram бота получить сложнее, оставляем null
+  const photoUrl = null;
+
+  // Проверяем, существует ли пользователь
+  const existing = await dbGet('SELECT * FROM users WHERE telegram_id = ?', [telegramId]);
+
+  if (existing) {
+    // Обновляем данные пользователя
+    await dbRun(
+      `UPDATE users
+       SET username = ?, first_name = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [username, fullName, existing.id],
+    );
+    return { isNew: false, userId: existing.id };
+  }
+
+  // Создаем нового пользователя
+  const insertResult = await dbRun(
+    'INSERT INTO users (telegram_id, username, first_name, photo_url) VALUES (?, ?, ?, ?) RETURNING id',
+    [telegramId, username, fullName, photoUrl],
+  );
+
+  const newUserId = insertResult.lastID || insertResult.rows?.[0]?.id;
+  if (!newUserId) {
+    throw new Error('Не удалось получить идентификатор нового пользователя');
+  }
+
+  // Создаем бесплатную подписку
+  const now = new Date();
+  const resetDate = new Date(now);
+  resetDate.setMonth(resetDate.getMonth() + 1);
+  resetDate.setDate(1);
+  resetDate.setHours(0, 0, 0, 0);
+
+  await dbRun(
+    `INSERT INTO subscriptions (
+      user_id, plan, status, docs_generated, docs_limit, activated_at, reset_date, updated_at
+    ) VALUES (?, 'free', 'active', 0, 1, ?, ?, CURRENT_TIMESTAMP)`,
+    [newUserId, now.toISOString(), resetDate.toISOString()],
+  );
+
+  return { isNew: true, userId: newUserId };
+};
+
+// Генерация временного токена для авторизации (как на poehali.dev)
+const generateAuthToken = async (telegramId) => {
+  // Генерируем UUID токен
+  const token = crypto.randomUUID();
+  
+  // Токен валиден 5 минут
+  const expiresAt = new Date();
+  expiresAt.setMinutes(expiresAt.getMinutes() + 5);
+  
+  // Сохраняем токен в БД
+  await dbRun(
+    `INSERT INTO auth_tokens (token, telegram_id, expires_at) 
+     VALUES (?, ?, ?)`,
+    [token, telegramId, expiresAt.toISOString()]
+  );
+  
+  console.log('[Telegram Bot] Сгенерирован токен авторизации:', {
+    token: token.substring(0, 8) + '...',
+    telegramId,
+    expiresAt: expiresAt.toISOString(),
+  });
+  
+  return token;
+};
+
+// Проверяем, валиден ли URL для Telegram (не localhost)
+const isValidTelegramUrl = (url) => {
+  if (!url) return false;
+  try {
+    const urlObj = new URL(url);
+    // Telegram не принимает localhost, 127.0.0.1, или IP адреса
+    const hostname = urlObj.hostname.toLowerCase();
+    return (
+      (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') &&
+      !hostname.includes('localhost') &&
+      !hostname.includes('127.0.0.1') &&
+      !hostname.match(/^\d+\.\d+\.\d+\.\d+$/) &&
+      !hostname.includes('::1')
+    );
+  } catch {
+    return false;
+  }
+};
+
+const initTelegramBot = () => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+
+  if (!token) {
+    console.warn('[Telegram Bot] TELEGRAM_BOT_TOKEN не задан. Бот не будет запущен.');
+    return null;
+  }
+
+  try {
+    // Автоматически определяем, использовать ли webhook
+    // В production (Render) используем webhook, локально - polling
+    const isProduction = process.env.NODE_ENV === 'production' || 
+                         process.env.RENDER === 'true' ||
+                         process.env.TELEGRAM_USE_WEBHOOK === 'true';
+    
+    if (isProduction) {
+      // Production: используем webhook
+      bot = new TelegramBot(token, { polling: false });
+      console.log('[Telegram Bot] Режим: Webhook (production)');
+      
+      // Устанавливаем webhook при старте
+      // Используем URL backend сервиса, не frontend
+      const backendUrl = process.env.BACKEND_URL || 
+                        process.env.RENDER_EXTERNAL_URL ||
+                        'https://go-doc-generator-backend.onrender.com';
+      const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL || 
+                        `${backendUrl.replace(/\/$/, '')}/api/telegram/webhook`;
+      
+      bot.setWebHook(webhookUrl)
+        .then(() => {
+          console.log(`[Telegram Bot] Webhook установлен: ${webhookUrl}`);
+        })
+        .catch((error) => {
+          console.error('[Telegram Bot] Ошибка установки webhook:', error.message);
+        });
+    } else {
+      // Development: используем polling
+      bot = new TelegramBot(token, { polling: true });
+      console.log('[Telegram Bot] Режим: Polling (development)');
+    }
+
+    // Обработка ошибок polling (409 Conflict)
+    bot.on('polling_error', (error) => {
+      // Игнорируем ошибку 409 - это нормально при перезапуске или нескольких экземплярах
+      if (error.code === 'ETELEGRAM' && error.response?.body?.error_code === 409) {
+        console.warn('[Telegram Bot] Polling конфликт (409) - другой экземпляр бота активен. Это нормально при перезапуске.');
+        return;
+      }
+      // Для других ошибок логируем
+      console.error('[Telegram Bot] Polling error:', error.message);
+    });
+
+    // Функция обработки команды /start (для переиспользования)
+    const handleStartCommand = async (msg) => {
+      const chatId = msg.chat.id;
+      const telegramId = msg.from.id;
+
+      try {
+        // Проверяем готовность базы данных
+        const isReady = await checkDbReady();
+        if (!isReady) {
+          await bot.sendMessage(
+            chatId,
+            '⏳ База данных еще не готова. Пожалуйста, попробуйте через несколько секунд.',
+          );
+          return;
+        }
+
+        // Автоматически регистрируем пользователя, если его нет
+        const registrationResult = await registerUserFromTelegram(msg.from);
+        
+        // Генерируем временный токен для авторизации (как на poehali.dev)
+        const authToken = await generateAuthToken(telegramId);
+        // Используем HashRouter для Render (URL с #)
+        const authLink = `${frontendUrl}/#/auth?token=${authToken}`;
+        
+        // Получаем данные пользователя с подпиской
+        const user = await dbGet(
+          `SELECT u.*, s.plan, s.status, s.docs_generated, s.docs_limit
+           FROM users u
+           LEFT JOIN subscriptions s ON u.id = s.user_id
+           WHERE u.telegram_id = ?`,
+          [telegramId]
+        );
+
+        const keyboard = [];
+        // Добавляем только кнопку с ссылкой для авторизации
+        keyboard.push([{ text: '🔐 Войти на сайт', url: authLink }]);
+
+        if (registrationResult.isNew) {
+          // Новый пользователь - приветствие с регистрацией
+          await bot.sendMessage(
+            chatId,
+            `🎉 Добро пожаловать в DocuGen, ${msg.from.first_name || 'пользователь'}!\n\n` +
+            `✅ Вы успешно зарегистрированы!\n\n` +
+            `🔐 Нажмите кнопку ниже, чтобы войти на сайт:\n` +
+            `(Ссылка действительна 5 минут)`,
+            {
+              reply_markup: {
+                inline_keyboard: keyboard,
+              },
+            }
+          );
+        } else {
+          // Существующий пользователь
+          await bot.sendMessage(
+            chatId,
+            `👋 Привет, ${msg.from.first_name || 'пользователь'}!\n\n` +
+            `🔐 Нажмите кнопку ниже, чтобы войти на сайт:\n` +
+            `(Ссылка действительна 5 минут)`,
+            {
+              reply_markup: {
+                inline_keyboard: keyboard,
+              },
+            }
+          );
+        }
+      } catch (error) {
+        console.error('[Telegram Bot] Error in /start:', error);
+        console.error('[Telegram Bot] Error stack:', error.stack);
+        console.error('[Telegram Bot] Error details:', {
+          message: error.message,
+          code: error.code,
+          telegramId: msg.from?.id,
+          chatId: msg.chat?.id,
+        });
+        try {
+          await bot.sendMessage(
+            msg.chat.id,
+            `❌ Произошла ошибка: ${error.message}\n\nПопробуйте позже или обратитесь в поддержку.`,
+          );
+        } catch (sendError) {
+          console.error('[Telegram Bot] Failed to send error message:', sendError);
+        }
+      }
+    };
+
+    // Обработка входа нового пользователя в бота (new_chat_members)
+    bot.on('new_chat_members', async (msg) => {
+      const chatId = msg.chat.id;
+      const newMembers = msg.new_chat_members || [];
+      const botInfo = await bot.getMe();
+
+      for (const member of newMembers) {
+        // Проверяем, что это не сам бот
+        if (member.id === botInfo.id) {
+          continue;
+        }
+
+        try {
+          const isReady = await checkDbReady();
+          if (!isReady) return;
+
+          // Автоматически запускаем /start для нового пользователя
+          const fakeMsg = {
+            ...msg,
+            from: member,
+            chat: msg.chat,
+            text: '/start',
+          };
+          // Вызываем обработчик /start напрямую
+          await handleStartCommand(fakeMsg);
+        } catch (error) {
+          console.error('[Telegram Bot] Error in new_chat_members handler:', error);
+        }
+      }
+    });
+
+    // Обработка любого сообщения для автоматической регистрации
+    bot.on('message', async (msg) => {
+      // Пропускаем команды, они обрабатываются отдельно
+      if (msg.text && msg.text.startsWith('/')) {
+        return;
+      }
+
+      const chatId = msg.chat.id;
+      const telegramId = msg.from.id;
+
+      try {
+        const isReady = await checkDbReady();
+        if (!isReady) return;
+
+        // Проверяем, зарегистрирован ли пользователь
+        const user = await dbGet('SELECT * FROM users WHERE telegram_id = ?', [telegramId]);
+        
+        if (!user) {
+          // Автоматически запускаем /start для регистрации
+          const fakeMsg = {
+            ...msg,
+            text: '/start',
+          };
+          // Вызываем обработчик /start напрямую
+          await handleStartCommand(fakeMsg);
+        }
+      } catch (error) {
+        console.error('[Telegram Bot] Error in message handler:', error);
+      }
+    });
+
+    // Обработка команды /start
+    bot.onText(/\/start/, handleStartCommand);
+
+    // Обработка команды /subscription
+    bot.onText(/\/subscription/, async (msg) => {
+      const chatId = msg.chat.id;
+      const telegramId = msg.from.id;
+
+      try {
+        const user = await dbGet(
+          `SELECT u.*, s.plan, s.status, s.docs_generated, s.docs_limit, s.expires_at, s.activated_at
+           FROM users u
+           LEFT JOIN subscriptions s ON u.id = s.user_id
+           WHERE u.telegram_id = ?`,
+          [telegramId]
+        );
+
+        if (!user) {
+          const keyboard = [];
+          if (isValidTelegramUrl(frontendUrl)) {
+            keyboard.push([{ text: '🌐 Открыть сайт', url: frontendUrl }]);
+          }
+
+          await bot.sendMessage(
+            chatId,
+            '❌ Вы не зарегистрированы. Авторизуйтесь на сайте через Telegram Login Widget.\n\n' +
+            `🌐 Открыть сайт: ${frontendUrl}`,
+            {
+              reply_markup: keyboard.length > 0 ? {
+                inline_keyboard: keyboard,
+              } : undefined,
+            }
+          );
+          return;
+        }
+
+        if (!user.plan) {
+          const keyboard = [];
+          const upgradeUrl = `${frontendUrl}/generator`;
+          if (isValidTelegramUrl(upgradeUrl)) {
+            keyboard.push([{ text: '💳 Купить подписку', url: upgradeUrl }]);
+          }
+
+          await bot.sendMessage(
+            chatId,
+            '📊 У вас нет активной подписки.\n\n' +
+            '💡 Оформите подписку для генерации документов:\n' +
+            `🌐 Открыть сайт: ${frontendUrl}`,
+            {
+              reply_markup: keyboard.length > 0 ? {
+                inline_keyboard: keyboard,
+              } : undefined,
+            }
+          );
+          return;
+        }
+
+        const planNames = {
+          free: 'Бесплатный',
+          basic: 'Базовый',
+          premium: 'Премиум',
+          single: 'Разовый документ',
+        };
+
+        const planName = planNames[user.plan] || user.plan;
+        const statusEmoji = user.status === 'active' ? '✅' : '❌';
+        const limitText = user.docs_limit == null ? '∞' : `${user.docs_limit}`;
+        const usedText = `${user.docs_generated} / ${limitText}`;
+        const expiresText = user.expires_at
+          ? new Date(user.expires_at).toLocaleDateString('ru-RU')
+          : 'Не ограничена';
+
+        const keyboard = [];
+        const upgradeUrl = `${frontendUrl}/generator`;
+        if (isValidTelegramUrl(upgradeUrl)) {
+          keyboard.push([{ text: '💳 Обновить подписку', url: upgradeUrl }]);
+        }
+
+        await bot.sendMessage(
+          chatId,
+          `📊 Статус подписки\n\n` +
+          `📦 Тариф: ${planName}\n` +
+          `Статус: ${statusEmoji} ${user.status === 'active' ? 'Активна' : 'Неактивна'}\n` +
+          `📄 Использовано: ${usedText}\n` +
+          `📅 Истекает: ${expiresText}\n` +
+          (user.activated_at ? `🕐 Активирована: ${new Date(user.activated_at).toLocaleDateString('ru-RU')}` : ''),
+          {
+            reply_markup: keyboard.length > 0 ? {
+              inline_keyboard: keyboard,
+            } : undefined,
+          }
+        );
+      } catch (error) {
+        console.error('[Telegram Bot] Error in /subscription:', error);
+        await bot.sendMessage(chatId, '❌ Произошла ошибка. Попробуйте позже.');
+      }
+    });
+
+    // Обработка команды /usage
+    bot.onText(/\/usage/, async (msg) => {
+      const chatId = msg.chat.id;
+      const telegramId = msg.from.id;
+
+      try {
+        const user = await dbGet(
+          `SELECT u.id, u.telegram_id, s.docs_generated, s.docs_limit, s.reset_date
+           FROM users u
+           LEFT JOIN subscriptions s ON u.id = s.user_id
+           WHERE u.telegram_id = ?`,
+          [telegramId]
+        );
+
+        if (!user) {
+          await bot.sendMessage(chatId, '❌ Вы не зарегистрированы.');
+          return;
+        }
+
+        const limitText = user.docs_limit == null ? '∞' : `${user.docs_limit}`;
+        const usedText = `${user.docs_generated || 0} / ${limitText}`;
+        const resetText = user.reset_date
+          ? new Date(user.reset_date).toLocaleDateString('ru-RU')
+          : 'Не установлена';
+
+        const keyboard = [];
+        const upgradeUrl = `${frontendUrl}/generator`;
+        if (isValidTelegramUrl(upgradeUrl)) {
+          keyboard.push([{ text: '💳 Обновить подписку', url: upgradeUrl }]);
+        }
+
+        await bot.sendMessage(
+          chatId,
+          `📊 Использование документов\n\n` +
+          `📄 Использовано: ${usedText}\n` +
+          `🔄 Сброс лимита: ${resetText}\n\n` +
+          (user.docs_limit != null && user.docs_generated >= user.docs_limit
+            ? '⚠️ Лимит исчерпан. Обновите подписку для продолжения работы.'
+            : '✅ Лимит не исчерпан.'),
+          {
+            reply_markup: keyboard.length > 0 ? {
+              inline_keyboard: keyboard,
+            } : undefined,
+          }
+        );
+      } catch (error) {
+        console.error('[Telegram Bot] Error in /usage:', error);
+        await bot.sendMessage(chatId, '❌ Произошла ошибка. Попробуйте позже.');
+      }
+    });
+
+    // Обработка команды /upgrade
+    bot.onText(/\/upgrade/, async (msg) => {
+      const chatId = msg.chat.id;
+      const keyboard = [];
+      const upgradeUrl = `${frontendUrl}/generator`;
+      if (isValidTelegramUrl(upgradeUrl)) {
+        keyboard.push([{ text: '💳 Купить подписку', url: upgradeUrl }]);
+      }
+
+      await bot.sendMessage(
+        chatId,
+        '💳 Обновление подписки\n\n' +
+        'Выберите тариф на сайте:\n' +
+        `🌐 Открыть сайт: ${frontendUrl}`,
+        {
+          reply_markup: keyboard.length > 0 ? {
+            inline_keyboard: keyboard,
+          } : undefined,
+        }
+      );
+    });
+
+    // Обработка callback кнопок
+    bot.on('callback_query', async (query) => {
+      const chatId = query.message.chat.id;
+      const data = query.data;
+
+      if (data === 'subscription') {
+        // Триггерим команду /subscription
+        const msg = { ...query.message, text: '/subscription', from: query.from };
+        bot.emit('text', msg);
+      }
+
+      await bot.answerCallbackQuery(query.id);
+    });
+
+    console.log('[Telegram Bot] Бот успешно инициализирован');
+    return bot;
+  } catch (error) {
+    console.error('[Telegram Bot] Ошибка инициализации:', error.message);
+    return null;
+  }
+};
+
+/**
+ * Отправка уведомления пользователю
+ */
+const sendNotification = async (telegramId, message, options = {}) => {
+  if (!bot) {
+    console.warn('[Telegram Bot] Бот не инициализирован, уведомление не отправлено');
+    return false;
+  }
+
+  try {
+    await bot.sendMessage(telegramId, message, options);
+    return true;
+  } catch (error) {
+    console.error(`[Telegram Bot] Ошибка отправки уведомления пользователю ${telegramId}:`, error.message);
+    return false;
+  }
+};
+
+/**
+ * Уведомление об успешной оплате
+ */
+const notifyPaymentSuccess = async (userId, planName) => {
+  try {
+    const user = await dbGet('SELECT telegram_id FROM users WHERE id = ?', [userId]);
+    if (!user || !user.telegram_id) {
+      return false;
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+    const keyboard = [];
+    if (isValidTelegramUrl(frontendUrl)) {
+      keyboard.push([{ text: '🌐 Открыть сайт', url: frontendUrl }]);
+    }
+
+    return await sendNotification(
+      user.telegram_id,
+      `✅ Оплата успешна!\n\n` +
+      `Ваша подписка "${planName}" активирована.\n\n` +
+      `Теперь вы можете генерировать документы без ограничений.`,
+      {
+        reply_markup: keyboard.length > 0 ? {
+          inline_keyboard: keyboard,
+        } : undefined,
+      }
+    );
+  } catch (error) {
+    console.error('[Telegram Bot] Error in notifyPaymentSuccess:', error);
+    return false;
+  }
+};
+
+/**
+ * Уведомление о генерации документа
+ */
+const notifyDocumentGenerated = async (userId, documentName) => {
+  try {
+    const user = await dbGet(
+      `SELECT u.telegram_id, s.docs_generated, s.docs_limit
+       FROM users u
+       LEFT JOIN subscriptions s ON u.id = s.user_id
+       WHERE u.id = ?`,
+      [userId]
+    );
+    if (!user || !user.telegram_id) {
+      return false;
+    }
+
+    const limitText = user.docs_limit == null ? '∞' : `${user.docs_limit}`;
+    const usedText = `${user.docs_generated || 0} / ${limitText}`;
+
+    return await sendNotification(
+      user.telegram_id,
+      `📄 Документ сгенерирован!\n\n` +
+      `Название: ${documentName}\n` +
+      `Использовано: ${usedText}`,
+    );
+  } catch (error) {
+    console.error('[Telegram Bot] Error in notifyDocumentGenerated:', error);
+    return false;
+  }
+};
+
+/**
+ * Уведомление об истечении подписки
+ */
+const notifySubscriptionExpiring = async (userId, daysLeft) => {
+  try {
+    const user = await dbGet('SELECT telegram_id FROM users WHERE id = ?', [userId]);
+    if (!user || !user.telegram_id) {
+      return false;
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+    const keyboard = [];
+    const upgradeUrl = `${frontendUrl}/generator`;
+    if (isValidTelegramUrl(upgradeUrl)) {
+      keyboard.push([{ text: '💳 Обновить подписку', url: upgradeUrl }]);
+    }
+
+    return await sendNotification(
+      user.telegram_id,
+      `⚠️ Подписка истекает через ${daysLeft} ${daysLeft === 1 ? 'день' : daysLeft < 5 ? 'дня' : 'дней'}!\n\n` +
+      `Обновите подписку, чтобы продолжить пользоваться сервисом.`,
+      {
+        reply_markup: keyboard.length > 0 ? {
+          inline_keyboard: keyboard,
+        } : undefined,
+      }
+    );
+  } catch (error) {
+    console.error('[Telegram Bot] Error in notifySubscriptionExpiring:', error);
+    return false;
+  }
+};
+
+/**
+ * Уведомление о регистрации нового пользователя
+ */
+const notifyUserRegistered = async (telegramId, firstName) => {
+  try {
+    if (!bot) {
+      console.warn('[Telegram Bot] Бот не инициализирован, уведомление о регистрации не отправлено');
+      return false;
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+    const keyboard = [];
+    if (isValidTelegramUrl(frontendUrl)) {
+      keyboard.push([{ text: '🌐 Открыть сайт', url: frontendUrl }]);
+    }
+    keyboard.push([
+      { text: '📊 Статус подписки', callback_data: 'subscription' },
+      { text: '📄 Использование', callback_data: 'usage' },
+    ]);
+
+    return await sendNotification(
+      telegramId,
+      `🎉 Добро пожаловать в DocuGen, ${firstName || 'пользователь'}!\n\n` +
+      `✅ Вы успешно зарегистрированы!\n\n` +
+      `📝 Теперь вы можете:\n` +
+      `• Генерировать документы по ГОСТ\n` +
+      `• Использовать команды бота для управления подпиской\n` +
+      `• Отслеживать использование документов\n\n` +
+      `Используйте команды:\n` +
+      `/subscription - статус подписки\n` +
+      `/usage - использовано документов\n` +
+      `/upgrade - купить подписку`,
+      {
+        reply_markup: keyboard.length > 0 ? {
+          inline_keyboard: keyboard,
+        } : undefined,
+      }
+    );
+  } catch (error) {
+    console.error('[Telegram Bot] Error in notifyUserRegistered:', error);
+    return false;
+  }
+};
+
+module.exports = {
+  initTelegramBot,
+  sendNotification,
+  notifyPaymentSuccess,
+  notifyDocumentGenerated,
+  notifySubscriptionExpiring,
+  notifyUserRegistered,
+  getBot: () => bot,
+};
+
