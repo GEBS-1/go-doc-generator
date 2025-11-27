@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const https = require('https');
 const jwt = require('jsonwebtoken');
 const { YooCheckout } = require('@a2seven/yoo-checkout');
-const { run: dbRun, get: dbGet } = require('./db');
+const { run: dbRun, get: dbGet, all: dbAll } = require('./db');
 const {
   initTelegramBot,
   notifyPaymentSuccess,
@@ -142,6 +142,9 @@ const PAYMENT_SUCCESS_URL = PAYMENT_RETURN_URL || `${DEFAULT_FRONTEND_ORIGIN}/pa
 const PAYMENT_FAIL_URL = process.env.PAYMENT_FAIL_URL || `${DEFAULT_FRONTEND_ORIGIN}/payment/failed`;
 
 const AUTH_TOKEN_TTL = process.env.AUTH_TOKEN_TTL || '7d';
+
+// Цена за токен в рублях
+const TOKEN_PRICE_RUB = 0.01;
 
 const planMeta = (planId) => SUBSCRIPTION_PLANS[planId] || null;
 
@@ -507,7 +510,7 @@ const subscriptionAllowsDocument = (subscription) => {
   return subscription.docsGenerated < subscription.docsLimit;
 };
 
-const evaluateDocumentQuota = async (userId, { consume = false } = {}) => {
+const evaluateDocumentQuota = async (userId, { consume = false, documentId = null } = {}) => {
   const user = await fetchUserWithSubscription(userId);
 
   if (!user || !user.subscription) {
@@ -518,21 +521,89 @@ const evaluateDocumentQuota = async (userId, { consume = false } = {}) => {
     };
   }
 
-  if (!subscriptionAllowsDocument(user.subscription)) {
+  // Проверяем, есть ли неоплаченные токены
+  const unpaidTokens = await dbAll(
+    `SELECT SUM(cost_rub) as total_cost, COUNT(*) as count 
+     FROM token_usage 
+     WHERE user_id = ? AND paid = FALSE`,
+    [userId]
+  );
+  const unpaidCost = parseFloat(unpaidTokens[0]?.total_cost || 0);
+
+  // Если есть неоплаченные токены, блокируем скачивание
+  if (unpaidCost > 0) {
     return {
       allowed: false,
-      reason: 'limit_exceeded',
+      reason: 'unpaid_tokens',
       subscription: mapSubscriptionUsage(user.subscription),
+      unpaidTokens: {
+        cost: unpaidCost,
+        count: unpaidTokens[0]?.count || 0,
+      },
     };
   }
 
+  // Проверяем, использовано ли бесплатное скачивание для этого документа
+  let hasFreeDownload = false;
+  if (documentId) {
+    const freeDownload = await dbGet(
+      `SELECT * FROM free_downloads WHERE user_id = ? AND document_id = ?`,
+      [userId, documentId]
+    );
+    hasFreeDownload = !!freeDownload;
+  }
+
+  // Проверяем, осталось ли бесплатное скачивание (только для free плана)
+  let canUseFreeDownload = false;
+  if (user.subscription.plan === 'free' && !documentId) {
+    // Проверяем, не использовал ли пользователь бесплатное скачивание
+    const freeDownloadsCount = await dbGet(
+      `SELECT COUNT(*) as count FROM free_downloads WHERE user_id = ?`,
+      [userId]
+    );
+    canUseFreeDownload = (parseInt(freeDownloadsCount?.count || 0) < 1);
+  }
+
+  // Если не осталось бесплатного скачивания и нет documentId (предварительная проверка)
+  if (!documentId && user.subscription.plan === 'free' && !canUseFreeDownload) {
+    // Проверяем лимит по подписке
+    if (!subscriptionAllowsDocument(user.subscription)) {
+      return {
+        allowed: false,
+        reason: 'limit_exceeded',
+        subscription: mapSubscriptionUsage(user.subscription),
+      };
+    }
+  }
+
+  // Если это проверка перед скачиванием (consume = false)
   if (!consume) {
     return {
       allowed: true,
       subscription: mapSubscriptionUsage(user.subscription),
+      canUseFreeDownload: user.subscription.plan === 'free' && canUseFreeDownload,
+      hasFreeDownload,
     };
   }
 
+  // Если consume = true, отмечаем использование бесплатного скачивания
+  if (documentId && user.subscription.plan === 'free' && !hasFreeDownload && canUseFreeDownload) {
+    await dbRun(
+      `INSERT INTO free_downloads (user_id, document_id) 
+       VALUES (?, ?) 
+       ON CONFLICT (user_id, document_id) DO NOTHING`,
+      [userId, documentId]
+    );
+    // Не увеличиваем счетчик документов для бесплатного скачивания
+    const updatedRow = await dbGet('SELECT * FROM subscriptions WHERE id = ?', [user.subscription.id]);
+    return {
+      allowed: true,
+      subscription: mapSubscriptionUsage(normalizeSubscriptionRow(updatedRow)),
+      usedFreeDownload: true,
+    };
+  }
+
+  // Обычное использование (платные планы или после бесплатного)
   await dbRun(
     `UPDATE subscriptions
      SET docs_generated = docs_generated + 1,
@@ -832,14 +903,15 @@ app.get('/api/subscription', requireAuth, async (req, res) => {
 
 app.post('/api/subscription/consume', requireAuth, async (req, res) => {
   try {
-    const { consume = true, documentName } = req.body || {};
+    const { consume = true, documentName, documentId } = req.body || {};
 
-    const result = await evaluateDocumentQuota(req.user.sub, { consume });
+    const result = await evaluateDocumentQuota(req.user.sub, { consume, documentId });
 
     if (!result.allowed) {
       return res.status(403).json({
         error: result.reason,
         subscription: result.subscription,
+        unpaidTokens: result.unpaidTokens || null,
       });
     }
 
@@ -851,11 +923,170 @@ app.post('/api/subscription/consume', requireAuth, async (req, res) => {
     res.json({
       allowed: true,
       subscription: result.subscription,
+      canUseFreeDownload: result.canUseFreeDownload,
+      hasFreeDownload: result.hasFreeDownload,
     });
   } catch (error) {
     console.error('Subscription consume error:', error);
     res.status(500).json({
       error: 'Не удалось обновить лимит документов',
+      details: error.message,
+    });
+  }
+});
+
+// Endpoint для сохранения токенов после генерации
+app.post('/api/tokens/record', requireAuth, async (req, res) => {
+  try {
+    const { documentId, promptTokens = 0, completionTokens = 0, totalTokens = 0 } = req.body || {};
+    const userId = req.user.sub;
+
+    if (!documentId) {
+      return res.status(400).json({
+        error: 'documentId обязателен',
+      });
+    }
+
+    const costRub = totalTokens * TOKEN_PRICE_RUB;
+
+    const result = await dbRun(
+      `INSERT INTO token_usage (
+        user_id, document_id, prompt_tokens, completion_tokens, total_tokens, cost_rub, paid
+      ) VALUES (?, ?, ?, ?, ?, ?, FALSE)
+      RETURNING id`,
+      [userId, documentId, promptTokens, completionTokens, totalTokens, costRub]
+    );
+
+    res.json({
+      success: true,
+      tokenUsage: {
+        id: result.lastID,
+        documentId,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        costRub,
+        paid: false,
+      },
+    });
+  } catch (error) {
+    console.error('Token record error:', error);
+    res.status(500).json({
+      error: 'Не удалось сохранить использование токенов',
+      details: error.message,
+    });
+  }
+});
+
+// Endpoint для получения неоплаченных токенов
+app.get('/api/tokens/unpaid', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.sub;
+
+    const unpaidTokens = await dbAll(
+      `SELECT 
+        id, document_id, prompt_tokens, completion_tokens, total_tokens, cost_rub, created_at
+       FROM token_usage 
+       WHERE user_id = ? AND paid = FALSE
+       ORDER BY created_at DESC`,
+      [userId]
+    );
+
+    const totalCost = unpaidTokens.reduce((sum, token) => sum + parseFloat(token.cost_rub || 0), 0);
+    const totalTokens = unpaidTokens.reduce((sum, token) => sum + parseInt(token.total_tokens || 0), 0);
+
+    res.json({
+      unpaidTokens: unpaidTokens.map(token => ({
+        id: token.id,
+        documentId: token.document_id,
+        promptTokens: token.prompt_tokens,
+        completionTokens: token.completion_tokens,
+        totalTokens: token.total_tokens,
+        costRub: parseFloat(token.cost_rub),
+        createdAt: token.created_at,
+      })),
+      summary: {
+        totalCost,
+        totalTokens,
+        count: unpaidTokens.length,
+      },
+    });
+  } catch (error) {
+    console.error('Get unpaid tokens error:', error);
+    res.status(500).json({
+      error: 'Не удалось получить неоплаченные токены',
+      details: error.message,
+    });
+  }
+});
+
+// Endpoint для создания платежа за токены
+app.post('/api/payments/create-tokens', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.sub;
+
+    // Получаем неоплаченные токены
+    const unpaidTokens = await dbAll(
+      `SELECT SUM(cost_rub) as total_cost, COUNT(*) as count 
+       FROM token_usage 
+       WHERE user_id = ? AND paid = FALSE`,
+      [userId]
+    );
+
+    const totalCost = parseFloat(unpaidTokens[0]?.total_cost || 0);
+    const count = parseInt(unpaidTokens[0]?.count || 0);
+
+    if (totalCost <= 0 || count === 0) {
+      return res.status(400).json({
+        error: 'Нет неоплаченных токенов',
+      });
+    }
+
+    if (!checkout) {
+      return res.status(503).json({
+        error: 'Платёжный шлюз не настроен',
+      });
+    }
+
+    const idempotenceKey = crypto.randomUUID();
+    const payment = await checkout.createPayment(
+      {
+        amount: {
+          value: totalCost.toFixed(2),
+          currency: 'RUB',
+        },
+        confirmation: {
+          type: 'redirect',
+          return_url: PAYMENT_SUCCESS_URL,
+        },
+        capture: true,
+        description: `DocuGen: оплата ${count} ${count === 1 ? 'токена' : count < 5 ? 'токенов' : 'токенов'}`,
+        metadata: {
+          userId,
+          type: 'tokens',
+          tokenCount: count,
+        },
+      },
+      idempotenceKey
+    );
+
+    // Сохраняем платеж в БД
+    await dbRun(
+      `INSERT INTO payments (user_id, payment_id, amount, currency, plan, status, metadata)
+       VALUES (?, ?, ?, 'RUB', 'tokens', 'pending', ?::jsonb)`,
+      [userId, payment.id, totalCost, JSON.stringify({ tokenCount: count, type: 'tokens' })]
+    );
+
+    res.json({
+      paymentId: payment.id,
+      confirmationUrl: payment.confirmation.confirmation_url,
+      amount: totalCost,
+      tokenCount: count,
+    });
+  } catch (error) {
+    console.error('Create tokens payment error:', error);
+    res.status(500).json({
+      error: 'Не удалось создать платеж',
       details: error.message,
     });
   }
@@ -996,12 +1227,36 @@ app.post('/api/payments/webhook', async (req, res) => {
       console.warn('Webhook без userId, невозможно создать запись платежа:', paymentId);
     }
 
-    if (event.event === 'payment.succeeded' && metadata.userId && metadata.planId) {
-      const plan = planMeta(metadata.planId);
-      const planName = plan?.name || metadata.planId;
-      await applySubscription(Number(metadata.userId), metadata.planId);
-      // Отправляем уведомление в Telegram
-      await notifyPaymentSuccess(Number(metadata.userId), planName);
+    if (event.event === 'payment.succeeded' && metadata.userId) {
+      // Обработка оплаты токенов
+      if (metadata.type === 'tokens') {
+        const userId = Number(metadata.userId);
+        const paymentRecord = await dbGet(
+          `SELECT id FROM payments WHERE payment_id = ?`,
+          [paymentId]
+        );
+        
+        if (paymentRecord) {
+          // Отмечаем все неоплаченные токены как оплаченные
+          await dbRun(
+            `UPDATE token_usage 
+             SET paid = TRUE, payment_id = ?, updated_at = CURRENT_TIMESTAMP 
+             WHERE user_id = ? AND paid = FALSE`,
+            [paymentRecord.id, userId]
+          );
+        }
+        
+        // Отправляем уведомление в Telegram
+        await notifyPaymentSuccess(userId, `Оплата токенов (${metadata.tokenCount || 0} шт.)`);
+      } 
+      // Обработка оплаты подписки
+      else if (metadata.planId) {
+        const plan = planMeta(metadata.planId);
+        const planName = plan?.name || metadata.planId;
+        await applySubscription(Number(metadata.userId), metadata.planId);
+        // Отправляем уведомление в Telegram
+        await notifyPaymentSuccess(Number(metadata.userId), planName);
+      }
     }
 
     if (event.event === 'payment.canceled' && metadata.userId) {

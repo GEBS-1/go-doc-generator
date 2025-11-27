@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download, FileCheck } from "lucide-react";
+import { Download, FileCheck, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, SectionType, Table, TableRow, TableCell, WidthType, ImageRun, Footer, PageNumber, Header, LevelFormat } from "docx";
 import { saveAs } from "file-saver";
@@ -19,6 +19,8 @@ import { chartToImage } from "@/lib/chartUtils";
 import { renderTitleTemplate, defaultTitleFields, TitleTemplateData } from "@/lib/titleTemplate";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { TokenPaymentModal } from "@/components/TokenPaymentModal";
+import { DocumentPreviewModal } from "@/components/DocumentPreviewModal";
 
 const DOC_TYPE_OPTIONS = [
   { value: "essay", label: "Реферат", templateValue: "РЕФЕРАТ" },
@@ -35,7 +37,7 @@ const DOC_TYPE_OPTIONS = [
 type DocTypeOption = (typeof DOC_TYPE_OPTIONS)[number];
 type DocTypeValue = DocTypeOption["value"];
 
-interface Section {
+export interface Section {
   id: string;
   title: string;
   content?: string;
@@ -70,6 +72,12 @@ interface TitlePageProps {
 export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
   const { token, refreshProfile } = useAuth();
   const authRequired = import.meta.env.VITE_REQUIRE_AUTH !== "false";
+  const [tokenPaymentOpen, setTokenPaymentOpen] = useState(false);
+  const [unpaidTokensData, setUnpaidTokensData] = useState<{
+    cost: number;
+    count: number;
+  } | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [titleFields, setTitleFields] = useState<{
     theme: string;
     documentType: DocTypeValue;
@@ -115,6 +123,8 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
     switch (code) {
       case "limit_exceeded":
         return "Превышен лимит документов для текущего тарифа";
+      case "unpaid_tokens":
+        return "У вас есть неоплаченные токены";
       case "no_subscription":
         return "Не найдена активная подписка. Обновите страницу или войдите снова.";
       default:
@@ -323,23 +333,33 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
         return;
       }
 
+      // Генерируем уникальный ID документа перед проверкой квоты
+      const documentId = crypto.randomUUID();
+
       if (quotaEnabled) {
         try {
           const response = await apiFetch<ConsumeResponse>("/api/subscription/consume", {
             method: "POST",
             token,
-            body: JSON.stringify({ consume: false }),
+            body: JSON.stringify({ consume: false, documentId }),
           });
           preCheckUsage = response.subscription ?? null;
         } catch (quotaError) {
           if (quotaError instanceof ApiError) {
             const errorData =
-              (quotaError.data as { error?: string; subscription?: SubscriptionUsage | null }) || undefined;
+              (quotaError.data as { error?: string; subscription?: SubscriptionUsage | null; unpaidTokens?: { cost: number; count: number } | null }) || undefined;
             const errorCode =
               typeof errorData?.error === "string" ? errorData.error : undefined;
-            toast.error(mapQuotaErrorMessage(errorCode), {
-              description: formatUsageDescription(errorData?.subscription ?? null),
-            });
+            
+            // Если есть неоплаченные токены, открываем модальное окно оплаты
+            if (errorCode === "unpaid_tokens" && errorData?.unpaidTokens) {
+              setUnpaidTokensData(errorData.unpaidTokens);
+              setTokenPaymentOpen(true);
+            } else {
+              toast.error(mapQuotaErrorMessage(errorCode), {
+                description: formatUsageDescription(errorData?.subscription ?? null),
+              });
+            }
           } else if (quotaError instanceof Error) {
             toast.error("Не удалось проверить лимит документов", {
               description: quotaError.message,
@@ -1157,12 +1177,23 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
           const consumeResponse = await apiFetch<ConsumeResponse>("/api/subscription/consume", {
             method: "POST",
             token,
-            body: JSON.stringify({ consume: true }),
+            body: JSON.stringify({ consume: true, documentId }),
           });
           postConsumeUsage = consumeResponse.subscription ?? null;
           await refreshProfile();
         } catch (consumeError) {
           console.error("Document quota consume error:", consumeError);
+          if (consumeError instanceof ApiError) {
+            const errorData =
+              (consumeError.data as { error?: string; subscription?: SubscriptionUsage | null; unpaidTokens?: { cost: number; count: number } | null }) || undefined;
+            const errorCode = typeof errorData?.error === "string" ? errorData.error : undefined;
+            
+            // Если есть неоплаченные токены, открываем модальное окно оплаты
+            if (errorCode === "unpaid_tokens" && errorData?.unpaidTokens) {
+              setUnpaidTokensData(errorData.unpaidTokens);
+              setTokenPaymentOpen(true);
+            }
+          }
         }
       }
 
@@ -1434,6 +1465,16 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                 Назад
               </Button>
               <Button 
+                type="button" 
+                onClick={() => setPreviewOpen(true)}
+                variant="outline" 
+                size="lg" 
+                className="flex-1"
+              >
+                <Eye className="mr-2 h-5 w-5" />
+                Предпросмотр
+              </Button>
+              <Button 
                 type="submit" 
                 variant="success" 
                 size="lg" 
@@ -1500,6 +1541,25 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
           </Card>
         </div>
       </div>
+      
+      <TokenPaymentModal
+        open={tokenPaymentOpen}
+        onOpenChange={(open) => {
+          setTokenPaymentOpen(open);
+          if (!open) {
+            setUnpaidTokensData(null);
+          }
+        }}
+        unpaidTokens={unpaidTokensData}
+      />
+
+      <DocumentPreviewModal
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        titleFields={titleFields}
+        sections={sections}
+        docTypeLabel={selectedDocType.label}
+      />
     </div>
   );
 };

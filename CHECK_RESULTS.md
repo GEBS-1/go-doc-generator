@@ -28,3 +28,4 @@ error: password authentication failed for user "Telebot" (код 28P01)
 2. ИЛИ сделать БД опциональной (как пытались)
 3. ИЛИ использовать production БД с Render
 
+
