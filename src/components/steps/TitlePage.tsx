@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download, FileCheck } from "lucide-react";
+import { Download, FileCheck, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, SectionType, Table, TableRow, TableCell, WidthType, ImageRun, Footer, PageNumber, Header, LevelFormat } from "docx";
 import { saveAs } from "file-saver";
@@ -19,6 +19,8 @@ import { chartToImage } from "@/lib/chartUtils";
 import { renderTitleTemplate, defaultTitleFields, TitleTemplateData } from "@/lib/titleTemplate";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { TokenPaymentModal } from "@/components/TokenPaymentModal";
+import { DocumentPreviewModal } from "@/components/DocumentPreviewModal";
 
 const DOC_TYPE_OPTIONS = [
   { value: "essay", label: "Реферат", templateValue: "РЕФЕРАТ" },
@@ -35,7 +37,7 @@ const DOC_TYPE_OPTIONS = [
 type DocTypeOption = (typeof DOC_TYPE_OPTIONS)[number];
 type DocTypeValue = DocTypeOption["value"];
 
-interface Section {
+export interface Section {
   id: string;
   title: string;
   content?: string;
@@ -70,6 +72,12 @@ interface TitlePageProps {
 export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
   const { token, refreshProfile } = useAuth();
   const authRequired = import.meta.env.VITE_REQUIRE_AUTH !== "false";
+  const [tokenPaymentOpen, setTokenPaymentOpen] = useState(false);
+  const [unpaidTokensData, setUnpaidTokensData] = useState<{
+    cost: number;
+    count: number;
+  } | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [titleFields, setTitleFields] = useState<{
     theme: string;
     documentType: DocTypeValue;
@@ -117,6 +125,8 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
         return "Превышен лимит документов для текущего тарифа";
       case "no_subscription":
         return "Не найдена активная подписка. Обновите страницу или войдите снова.";
+      case "unpaid_tokens":
+        return "У вас есть неоплаченные токены. Необходимо произвести оплату для скачивания документа.";
       default:
         return "Не удалось проверить лимит документов";
     }
@@ -334,12 +344,19 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
         } catch (quotaError) {
           if (quotaError instanceof ApiError) {
             const errorData =
-              (quotaError.data as { error?: string; subscription?: SubscriptionUsage | null }) || undefined;
+              (quotaError.data as { error?: string; subscription?: SubscriptionUsage | null; unpaidTokens?: { cost: number; count: number } }) || undefined;
             const errorCode =
               typeof errorData?.error === "string" ? errorData.error : undefined;
-            toast.error(mapQuotaErrorMessage(errorCode), {
-              description: formatUsageDescription(errorData?.subscription ?? null),
-            });
+            
+            // Если есть неоплаченные токены, открываем модальное окно оплаты
+            if (errorCode === "unpaid_tokens" && errorData?.unpaidTokens) {
+              setUnpaidTokensData(errorData.unpaidTokens);
+              setTokenPaymentOpen(true);
+            } else {
+              toast.error(mapQuotaErrorMessage(errorCode), {
+                description: formatUsageDescription(errorData?.subscription ?? null),
+              });
+            }
           } else if (quotaError instanceof Error) {
             toast.error("Не удалось проверить лимит документов", {
               description: quotaError.message,
@@ -1295,7 +1312,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                   id="university"
                   value={titleFields.university}
                   onChange={(e) => handleFieldChange("university", e.target.value)}
-                  placeholder="Казанский (Приволжский) федеральный университет"
+                  placeholder="Московский государственный университет"
                 />
               </div>
 
@@ -1305,7 +1322,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                   id="faculty"
                   value={titleFields.faculty}
                   onChange={(e) => handleFieldChange("faculty", e.target.value)}
-                  placeholder="Институт управления, экономики и финансов"
+                  placeholder="Институт/Факультет"
                 />
               </div>
 
@@ -1315,7 +1332,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                   id="department"
                   value={titleFields.department}
                   onChange={(e) => handleFieldChange("department", e.target.value)}
-                  placeholder="Кафедра цифровой экономики"
+                  placeholder="Кафедра..."
                 />
               </div>
 
@@ -1433,6 +1450,16 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
               >
                 Назад
               </Button>
+              <Button
+                type="button"
+                onClick={() => setPreviewOpen(true)}
+                variant="outline"
+                size="lg"
+                className="flex-1"
+              >
+                <Eye className="mr-2 h-5 w-5" />
+                Предпросмотр
+              </Button>
               <Button 
                 type="submit" 
                 variant="success" 
@@ -1500,6 +1527,25 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
           </Card>
         </div>
       </div>
+
+      <TokenPaymentModal
+        open={tokenPaymentOpen}
+        onOpenChange={(open) => {
+          setTokenPaymentOpen(open);
+          if (!open) {
+            setUnpaidTokensData(null);
+          }
+        }}
+        unpaidTokens={unpaidTokensData}
+      />
+
+      <DocumentPreviewModal
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        titleFields={titleFields}
+        sections={sections}
+        docTypeLabel={selectedDocType.label}
+      />
     </div>
   );
 };
