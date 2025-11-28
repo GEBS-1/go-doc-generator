@@ -21,7 +21,6 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { TokenPaymentModal } from "@/components/TokenPaymentModal";
 import { DocumentPreviewModal } from "@/components/DocumentPreviewModal";
-import { SubscriptionUpgradeModal } from "@/components/SubscriptionUpgradeModal";
 
 const DOC_TYPE_OPTIONS = [
   { value: "essay", label: "Реферат", templateValue: "РЕФЕРАТ" },
@@ -79,7 +78,6 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
     count: number;
   } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [titleFields, setTitleFields] = useState<{
     theme: string;
     documentType: DocTypeValue;
@@ -355,8 +353,32 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
               setUnpaidTokensData(errorData.unpaidTokens);
               setTokenPaymentOpen(true);
             } else if (errorCode === "limit_exceeded") {
-              // При превышении лимита открываем модальное окно обновления подписки
-              setUpgradeModalOpen(true);
+              // При превышении лимита документов - это означает, что нужно оплатить токены
+              // Показываем сообщение и предлагаем проверить неоплаченные токены
+              toast.error("Превышен лимит документов", {
+                description: "Для продолжения работы необходимо оплатить использованные токены. Проверьте неоплаченные токены.",
+                action: {
+                  label: "Проверить токены",
+                  onClick: async () => {
+                    if (token) {
+                      try {
+                        const unpaidData = await apiFetch<{ unpaidTokens: { cost: number; count: number } }>("/api/tokens/unpaid", {
+                          method: "GET",
+                          token,
+                        });
+                        if (unpaidData.unpaidTokens) {
+                          setUnpaidTokensData(unpaidData.unpaidTokens);
+                          setTokenPaymentOpen(true);
+                        } else {
+                          toast.info("Неоплаченных токенов не найдено");
+                        }
+                      } catch (err) {
+                        toast.error("Не удалось проверить токены");
+                      }
+                    }
+                  },
+                },
+              });
             } else {
               toast.error(mapQuotaErrorMessage(errorCode), {
                 description: formatUsageDescription(errorData?.subscription ?? null),
@@ -1550,12 +1572,6 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
         titleFields={titleFields}
         sections={sections}
         docTypeLabel={selectedDocType.label}
-      />
-
-      <SubscriptionUpgradeModal
-        open={upgradeModalOpen}
-        onOpenChange={setUpgradeModalOpen}
-        currentPlanId={user?.subscription?.planId}
       />
     </div>
   );
