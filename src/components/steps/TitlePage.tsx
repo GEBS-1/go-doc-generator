@@ -21,6 +21,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { TokenPaymentModal } from "@/components/TokenPaymentModal";
 import { DocumentPreviewModal } from "@/components/DocumentPreviewModal";
+import { SubscriptionUpgradeModal } from "@/components/SubscriptionUpgradeModal";
 
 const DOC_TYPE_OPTIONS = [
   { value: "essay", label: "Реферат", templateValue: "РЕФЕРАТ" },
@@ -70,7 +71,7 @@ interface TitlePageProps {
 }
 
 export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
-  const { token, refreshProfile } = useAuth();
+  const { token, refreshProfile, user } = useAuth();
   const authRequired = import.meta.env.VITE_REQUIRE_AUTH !== "false";
   const [tokenPaymentOpen, setTokenPaymentOpen] = useState(false);
   const [unpaidTokensData, setUnpaidTokensData] = useState<{
@@ -78,6 +79,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
     count: number;
   } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [titleFields, setTitleFields] = useState<{
     theme: string;
     documentType: DocTypeValue;
@@ -352,6 +354,9 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
             if (errorCode === "unpaid_tokens" && errorData?.unpaidTokens) {
               setUnpaidTokensData(errorData.unpaidTokens);
               setTokenPaymentOpen(true);
+            } else if (errorCode === "limit_exceeded") {
+              // При превышении лимита открываем модальное окно обновления подписки
+              setUpgradeModalOpen(true);
             } else {
               toast.error(mapQuotaErrorMessage(errorCode), {
                 description: formatUsageDescription(errorData?.subscription ?? null),
@@ -1545,6 +1550,12 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
         titleFields={titleFields}
         sections={sections}
         docTypeLabel={selectedDocType.label}
+      />
+
+      <SubscriptionUpgradeModal
+        open={upgradeModalOpen}
+        onOpenChange={setUpgradeModalOpen}
+        currentPlanId={user?.subscription?.planId}
       />
     </div>
   );
