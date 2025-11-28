@@ -110,53 +110,6 @@ const initDatabase = async () => {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires ON auth_tokens(expires_at)
   `);
-
-  // Таблица для учета использования токенов
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS token_usage (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-      document_id TEXT,
-      prompt_tokens INTEGER NOT NULL DEFAULT 0,
-      completion_tokens INTEGER NOT NULL DEFAULT 0,
-      total_tokens INTEGER NOT NULL DEFAULT 0,
-      cost_rub NUMERIC(10, 4) NOT NULL DEFAULT 0,
-      paid BOOLEAN DEFAULT FALSE,
-      payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
-      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Индексы для token_usage
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_token_usage_user_id ON token_usage(user_id)
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_token_usage_paid ON token_usage(paid)
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_token_usage_document_id ON token_usage(document_id)
-  `);
-
-  // Таблица для отслеживания бесплатных скачиваний
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS free_downloads (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-      document_id TEXT,
-      used_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(user_id, document_id)
-    )
-  `);
-
-  // Индексы для free_downloads
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_free_downloads_user_id ON free_downloads(user_id)
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_free_downloads_document_id ON free_downloads(document_id)
-  `);
 };
 
 initPromise = initDatabase().catch((error) => {
