@@ -1346,6 +1346,14 @@ app.post('/api/gigachat/generate', async (req, res) => {
       const status = error.response.status;
       if (status === 401) {
         tokenCache = { token: null, expiresAt: null };
+      } else if (status === 402) {
+        // 402 от GigaChat API означает проблему с балансом/квотами аккаунта GigaChat
+        return res.status(402).json({ 
+          error: 'GigaChat API: Требуется оплата или проблема с балансом аккаунта GigaChat',
+          message: 'У аккаунта GigaChat закончился баланс или квоты. Проверьте настройки GigaChat API в переменных окружения сервера.',
+          details: error.response.data,
+          code: 'GIGACHAT_PAYMENT_REQUIRED'
+        });
       }
       return res.status(status).json({ 
         error: error.response.data?.message || 'Ошибка генерации',
