@@ -103,11 +103,20 @@ export const StructureEditor = ({ theme, docType, sourceMaterials, onNext, onBac
       console.error('Error generating structure:', error);
       
       if (error instanceof GigaChatError) {
-        toast.error(`Ошибка: ${error.message}`, {
-          description: error.code === 'NO_CREDENTIALS' 
-            ? 'Настройте API ключи в .env файле'
-            : undefined
-        });
+        if (error.code === 'GIGACHAT_PAYMENT_REQUIRED') {
+          toast.error('Проблема с GigaChat API', {
+            description: 'У аккаунта GigaChat закончился баланс или квоты. Обратитесь к администратору для проверки настроек GigaChat API на сервере.',
+            duration: 10000,
+          });
+        } else if (error.code === 'NO_CREDENTIALS') {
+          toast.error(`Ошибка: ${error.message}`, {
+            description: 'Настройте API ключи в .env файле'
+          });
+        } else {
+          toast.error(`Ошибка: ${error.message}`, {
+            description: error.code ? `Код ошибки: ${error.code}` : undefined
+          });
+        }
       } else {
         toast.error('Не удалось сгенерировать структуру');
       }

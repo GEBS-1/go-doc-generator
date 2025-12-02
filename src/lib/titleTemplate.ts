@@ -8,8 +8,15 @@ import {
   Packer,
   TextRun,
   IParagraphOptions,
-  SpacingOptions,
 } from "docx";
+
+// Определяем тип SpacingOptions вручную, так как он не экспортируется
+interface SpacingOptions {
+  before?: number;
+  after?: number;
+  line?: number;
+  lineRule?: "auto" | "exact" | "atLeast";
+}
 
 const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
   const globalScope = globalThis as unknown as {
@@ -62,16 +69,16 @@ export interface TitleTemplateData {
 }
 
 export const defaultTitleFields: Required<Pick<TitleTemplateData, "UNIVERSITY" | "FACULTY" | "DEPARTMENT" | "DIRECTION" | "PROFILE" | "AUTHOR" | "GROUP" | "SUPERVISOR" | "SUPERVISOR_POSITION" | "CITY">> = {
-  UNIVERSITY: "Казанский (Приволжский) федеральный университет",
-  FACULTY: "Институт управления, экономики и финансов",
-  DEPARTMENT: "Кафедра цифровой экономики",
+  UNIVERSITY: "Московский государственный университет",
+  FACULTY: "Институт/Факультет",
+  DEPARTMENT: "Кафедра ...",
   DIRECTION: "38.03.02 Менеджмент",
   PROFILE: "Цифровые технологии в бизнесе",
   AUTHOR: "Студент",
   GROUP: "",
   SUPERVISOR: "Научный руководитель",
   SUPERVISOR_POSITION: "",
-  CITY: "Казань",
+  CITY: "Москва",
 };
 
 let defaultTemplatePromise: Promise<ArrayBuffer> | null = null;
@@ -265,7 +272,7 @@ const getDefaultTemplateBuffer = async (): Promise<ArrayBuffer> => {
   return defaultTemplatePromise;
 };
 
-type AlignmentVal = AlignmentType | undefined;
+type AlignmentVal = typeof AlignmentType[keyof typeof AlignmentType] | undefined;
 
 const mapAlignment = (value: string | null | undefined): AlignmentVal => {
   switch (value) {
@@ -394,11 +401,8 @@ const convertDocumentXmlToParagraphs = (xml: string): Paragraph[] => {
     const paragraphOptions: IParagraphOptions = {
       children: runs,
       alignment,
+      ...(spacing && { spacing }),
     };
-
-    if (spacing) {
-      paragraphOptions.spacing = spacing;
-    }
 
     return new Paragraph(paragraphOptions);
   });

@@ -70,7 +70,7 @@ interface TitlePageProps {
 }
 
 export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
-  const { token, refreshProfile } = useAuth();
+  const { token, refreshProfile, user } = useAuth();
   const authRequired = import.meta.env.VITE_REQUIRE_AUTH !== "false";
   const [tokenPaymentOpen, setTokenPaymentOpen] = useState(false);
   const [unpaidTokensData, setUnpaidTokensData] = useState<{
@@ -123,10 +123,10 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
     switch (code) {
       case "limit_exceeded":
         return "Превышен лимит документов для текущего тарифа";
-      case "unpaid_tokens":
-        return "У вас есть неоплаченные токены";
       case "no_subscription":
         return "Не найдена активная подписка. Обновите страницу или войдите снова.";
+      case "unpaid_tokens":
+        return "У вас есть неоплаченные токены. Необходимо произвести оплату для скачивания документа.";
       default:
         return "Не удалось проверить лимит документов";
     }
@@ -333,21 +333,18 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
         return;
       }
 
-      // Генерируем уникальный ID документа перед проверкой квоты
-      const documentId = crypto.randomUUID();
-
       if (quotaEnabled) {
         try {
           const response = await apiFetch<ConsumeResponse>("/api/subscription/consume", {
             method: "POST",
             token,
-            body: JSON.stringify({ consume: false, documentId }),
+            body: JSON.stringify({ consume: false }),
           });
           preCheckUsage = response.subscription ?? null;
         } catch (quotaError) {
           if (quotaError instanceof ApiError) {
             const errorData =
-              (quotaError.data as { error?: string; subscription?: SubscriptionUsage | null; unpaidTokens?: { cost: number; count: number } | null }) || undefined;
+              (quotaError.data as { error?: string; subscription?: SubscriptionUsage | null; unpaidTokens?: { cost: number; count: number } }) || undefined;
             const errorCode =
               typeof errorData?.error === "string" ? errorData.error : undefined;
             
@@ -355,6 +352,33 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
             if (errorCode === "unpaid_tokens" && errorData?.unpaidTokens) {
               setUnpaidTokensData(errorData.unpaidTokens);
               setTokenPaymentOpen(true);
+            } else if (errorCode === "limit_exceeded") {
+              // При превышении лимита документов - это означает, что нужно оплатить токены
+              // Показываем сообщение и предлагаем проверить неоплаченные токены
+              toast.error("Превышен лимит документов", {
+                description: "Для продолжения работы необходимо оплатить использованные токены. Проверьте неоплаченные токены.",
+                action: {
+                  label: "Проверить токены",
+                  onClick: async () => {
+                    if (token) {
+                      try {
+                        const unpaidData = await apiFetch<{ unpaidTokens: { cost: number; count: number } }>("/api/tokens/unpaid", {
+                          method: "GET",
+                          token,
+                        });
+                        if (unpaidData.unpaidTokens) {
+                          setUnpaidTokensData(unpaidData.unpaidTokens);
+                          setTokenPaymentOpen(true);
+                        } else {
+                          toast.info("Неоплаченных токенов не найдено");
+                        }
+                      } catch (err) {
+                        toast.error("Не удалось проверить токены");
+                      }
+                    }
+                  },
+                },
+              });
             } else {
               toast.error(mapQuotaErrorMessage(errorCode), {
                 description: formatUsageDescription(errorData?.subscription ?? null),
@@ -1177,23 +1201,12 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
           const consumeResponse = await apiFetch<ConsumeResponse>("/api/subscription/consume", {
             method: "POST",
             token,
-            body: JSON.stringify({ consume: true, documentId }),
+            body: JSON.stringify({ consume: true }),
           });
           postConsumeUsage = consumeResponse.subscription ?? null;
           await refreshProfile();
         } catch (consumeError) {
           console.error("Document quota consume error:", consumeError);
-          if (consumeError instanceof ApiError) {
-            const errorData =
-              (consumeError.data as { error?: string; subscription?: SubscriptionUsage | null; unpaidTokens?: { cost: number; count: number } | null }) || undefined;
-            const errorCode = typeof errorData?.error === "string" ? errorData.error : undefined;
-            
-            // Если есть неоплаченные токены, открываем модальное окно оплаты
-            if (errorCode === "unpaid_tokens" && errorData?.unpaidTokens) {
-              setUnpaidTokensData(errorData.unpaidTokens);
-              setTokenPaymentOpen(true);
-            }
-          }
         }
       }
 
@@ -1326,7 +1339,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                   id="university"
                   value={titleFields.university}
                   onChange={(e) => handleFieldChange("university", e.target.value)}
-                  placeholder="Казанский (Приволжский) федеральный университет"
+                  placeholder="Московский государственный университет"
                 />
               </div>
 
@@ -1336,7 +1349,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                   id="faculty"
                   value={titleFields.faculty}
                   onChange={(e) => handleFieldChange("faculty", e.target.value)}
-                  placeholder="Институт управления, экономики и финансов"
+                  placeholder="Институт/Факультет"
                 />
               </div>
 
@@ -1346,7 +1359,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
                   id="department"
                   value={titleFields.department}
                   onChange={(e) => handleFieldChange("department", e.target.value)}
-                  placeholder="Кафедра цифровой экономики"
+                  placeholder="Кафедра..."
                 />
               </div>
 
@@ -1464,11 +1477,11 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
               >
                 Назад
               </Button>
-              <Button 
-                type="button" 
+              <Button
+                type="button"
                 onClick={() => setPreviewOpen(true)}
-                variant="outline" 
-                size="lg" 
+                variant="outline"
+                size="lg"
                 className="flex-1"
               >
                 <Eye className="mr-2 h-5 w-5" />
@@ -1541,7 +1554,7 @@ export const TitlePage = ({ sections, theme, onBack }: TitlePageProps) => {
           </Card>
         </div>
       </div>
-      
+
       <TokenPaymentModal
         open={tokenPaymentOpen}
         onOpenChange={(open) => {

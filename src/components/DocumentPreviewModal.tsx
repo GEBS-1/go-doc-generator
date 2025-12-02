@@ -6,7 +6,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { defaultTitleFields, TitleTemplateData } from "@/lib/titleTemplate";
+import { defaultTitleFields } from "@/lib/titleTemplate";
 import type { Section } from "@/components/steps/TitlePage";
 
 interface DocumentPreviewModalProps {
@@ -40,16 +40,16 @@ export function DocumentPreviewModal({
 }: DocumentPreviewModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0">
+        <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle>Предпросмотр документа</DialogTitle>
           <DialogDescription>
             Просмотрите документ перед скачиванием
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 pr-4">
-          <div className="space-y-8">
+        <ScrollArea className="flex-1 px-6 pb-6" style={{ maxHeight: 'calc(90vh - 120px)' }}>
+          <div className="space-y-8 pr-4">
             {/* Титульный лист */}
             <div className="space-y-6 border-b pb-8">
               <h2 className="text-2xl font-bold">Титульный лист</h2>
@@ -142,7 +142,10 @@ export function DocumentPreviewModal({
                         )}
                         {table.headers && (
                           <div className="grid border-b">
-                            <div className="grid gap-0" style={{ gridTemplateColumns: `repeat(${table.headers.length}, 1fr)` }}>
+                            <div
+                              className="grid gap-0"
+                              style={{ gridTemplateColumns: `repeat(${table.headers.length}, 1fr)` }}
+                            >
                               {table.headers.map((header, hIndex) => (
                                 <div
                                   key={hIndex}
@@ -201,4 +204,5 @@ export function DocumentPreviewModal({
     </Dialog>
   );
 }
+
 

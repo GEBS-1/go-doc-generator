@@ -36,7 +36,7 @@ if (import.meta.env.DEV) {
   console.groupEnd();
 }
 
-import { apiFetch } from "./api";
+import { apiFetch, ApiError } from "./api";
 
 interface GigaChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -300,25 +300,47 @@ export async function generateTextWithGigaChat(
 
   try {
     if (useBackendProxy) {
-      const response = await apiFetch<any>("/api/gigachat/generate", {
-        method: "POST",
-        body: {
-          prompt,
-          systemPrompt,
-          max_tokens: 2048,
-          temperature: 0.7,
-        },
-      });
+      try {
+        const response = await apiFetch<any>("/api/gigachat/generate", {
+          method: "POST",
+          body: {
+            prompt,
+            systemPrompt,
+            max_tokens: 2048,
+            temperature: 0.7,
+          },
+        });
 
-      const choice = response?.choices?.[0]?.message?.content;
-      if (!choice) {
-        throw new GigaChatError(
-          "INVALID_RESPONSE",
-          "Proxy вернул неожиданный ответ",
-          response,
-        );
+        const choice = response?.choices?.[0]?.message?.content;
+        if (!choice) {
+          throw new GigaChatError(
+            "INVALID_RESPONSE",
+            "Proxy вернул неожиданный ответ",
+            response,
+          );
+        }
+        return choice;
+      } catch (error) {
+        // Обработка ошибок от backend proxy
+        if (error instanceof ApiError) {
+          if (error.status === 402) {
+            const errorData = error.data as { code?: string; message?: string } | undefined;
+            const message = errorData?.message || error.message || 'Проблема с аккаунтом GigaChat API';
+            throw new GigaChatError(
+              "GIGACHAT_PAYMENT_REQUIRED",
+              message,
+              error.data,
+            );
+          }
+          // Преобразуем другие ApiError в GigaChatError
+          throw new GigaChatError(
+            `API_${error.status}`,
+            error.message || 'Ошибка при генерации текста',
+            error.data,
+          );
+        }
+        throw error;
       }
-      return choice;
     }
 
     // Получаем токен доступа

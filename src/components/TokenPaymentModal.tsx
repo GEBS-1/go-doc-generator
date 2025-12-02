@@ -60,7 +60,7 @@ export function TokenPaymentModal({
 
   const loadUnpaidTokens = async () => {
     if (!token) return;
-    
+
     setLoadingTokens(true);
     try {
       const data = await apiFetch<UnpaidTokensResponse>("/api/tokens/unpaid", {
@@ -135,8 +135,7 @@ export function TokenPaymentModal({
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">Количество токенов:</span>
                     <span className="text-sm font-semibold">
-                      {unpaidTokens?.summary?.totalTokens.toLocaleString("ru-RU") ||
-                        "—"}
+                      {unpaidTokens?.summary?.totalTokens.toLocaleString("ru-RU") || "—"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
@@ -214,5 +213,8 @@ export function TokenPaymentModal({
     </Dialog>
   );
 }
+
+
+
 
 
