@@ -5,7 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area";
 import { defaultTitleFields } from "@/lib/titleTemplate";
 import type { Section } from "@/components/steps/TitlePage";
 
@@ -40,16 +40,18 @@ export function DocumentPreviewModal({
 }: DocumentPreviewModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0">
-        <DialogHeader className="px-6 pt-6 pb-4">
+      <DialogContent className="max-w-4xl max-h-[90vh] p-0 flex flex-col overflow-hidden">
+        <DialogHeader className="px-6 pt-6 pb-4 flex-shrink-0">
           <DialogTitle>Предпросмотр документа</DialogTitle>
           <DialogDescription>
             Просмотрите документ перед скачиванием
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 px-6 pb-6" style={{ maxHeight: 'calc(90vh - 120px)' }}>
-          <div className="space-y-8 pr-4">
+        <div className="flex-1 overflow-hidden px-6 pb-6 min-h-0">
+          <ScrollAreaPrimitive.Root className="h-full w-full overflow-hidden">
+            <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit]">
+              <div className="space-y-8 pr-4 pb-4">
             {/* Титульный лист */}
             <div className="space-y-6 border-b pb-8">
               <h2 className="text-2xl font-bold">Титульный лист</h2>
@@ -198,8 +200,16 @@ export function DocumentPreviewModal({
                 )}
               </div>
             ))}
-          </div>
-        </ScrollArea>
+              </div>
+            </ScrollAreaPrimitive.Viewport>
+            <ScrollAreaPrimitive.Scrollbar
+              orientation="vertical"
+              className="flex touch-none select-none transition-colors h-full w-2.5 border-l border-l-transparent p-[1px]"
+            >
+              <ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-border" />
+            </ScrollAreaPrimitive.Scrollbar>
+          </ScrollAreaPrimitive.Root>
+        </div>
       </DialogContent>
     </Dialog>
   );

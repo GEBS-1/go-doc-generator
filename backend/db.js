@@ -2,23 +2,25 @@ const { Pool } = require('pg');
 
 const connectionString = process.env.DATABASE_URL;
 
-if (!connectionString) {
-  throw new Error('DATABASE_URL не задан. Укажите строку подключения к PostgreSQL в переменных окружения.');
+let pool = null;
+
+if (connectionString) {
+  const shouldUseSsl =
+    process.env.PGSSLMODE === 'require' ||
+    process.env.PGSSL === 'true' ||
+    /render\.com|supabase|railway|neon\.tech|aws/.test(connectionString);
+
+  pool = new Pool({
+    connectionString,
+    ssl: shouldUseSsl
+      ? {
+          rejectUnauthorized: false,
+        }
+      : undefined,
+  });
+} else {
+  console.warn('[DB] DATABASE_URL не задан. БД будет недоступна, но сервер продолжит работу.');
 }
-
-const shouldUseSsl =
-  process.env.PGSSLMODE === 'require' ||
-  process.env.PGSSL === 'true' ||
-  /render\.com|supabase|railway|neon\.tech|aws/.test(connectionString);
-
-const pool = new Pool({
-  connectionString,
-  ssl: shouldUseSsl
-    ? {
-        rejectUnauthorized: false,
-      }
-    : undefined,
-});
 
 const transformPlaceholders = (sql = '') => {
   let index = 0;
@@ -32,6 +34,10 @@ const transformPlaceholders = (sql = '') => {
 let initPromise;
 
 const runQuery = async (sql, params = []) => {
+  if (!pool) {
+    throw new Error('База данных недоступна. Проверьте подключение к БД.');
+  }
+  
   await initPromise;
 
   const { text, index } = transformPlaceholders(sql);
@@ -46,6 +52,9 @@ const runQuery = async (sql, params = []) => {
 };
 
 const initDatabase = async () => {
+  if (!pool) {
+    throw new Error('DATABASE_URL не задан');
+  }
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -110,11 +119,13 @@ const initDatabase = async () => {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires ON auth_tokens(expires_at)
   `);
+
 };
 
 initPromise = initDatabase().catch((error) => {
-  console.error('[DB] Не удалось инициализировать базу данных:', error);
-  process.exit(1);
+  console.error('[DB] Не удалось инициализировать базу данных:', error.message);
+  console.warn('[DB] Сервер продолжит работу, но функции БД будут недоступны');
+  // Не убиваем процесс, чтобы сервер мог работать для GigaChat API даже без БД
 });
 
 const run = async (sql, params = []) => {

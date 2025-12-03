@@ -36,7 +36,8 @@ interface TokenPaymentModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   unpaidTokens?: {
-    cost: number;
+    cost?: number;
+    totalCost?: number;
     count: number;
   } | null;
 }
@@ -110,7 +111,12 @@ export function TokenPaymentModal({
     }
   };
 
+  // Нормализуем summary - может быть из unpaidTokens.summary или из initialUnpaidTokens
   const summary = unpaidTokens?.summary || initialUnpaidTokens;
+  const totalCost = 
+    (summary && 'totalCost' in summary ? summary.totalCost : undefined) ?? 
+    (summary && 'cost' in summary ? summary.cost : undefined) ?? 
+    0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -147,10 +153,7 @@ export function TokenPaymentModal({
                   <div className="flex items-center justify-between border-t pt-2">
                     <span className="text-base font-semibold">К оплате:</span>
                     <span className="text-lg font-bold text-primary">
-                      {summary.cost?.toFixed(2) ||
-                        unpaidTokens?.summary?.totalCost.toFixed(2) ||
-                        "0.00"}{" "}
-                      ₽
+                      {totalCost.toFixed(2)} ₽
                     </span>
                   </div>
                 </div>
@@ -190,7 +193,7 @@ export function TokenPaymentModal({
           </Button>
           <Button
             onClick={handlePay}
-            disabled={processing || loadingTokens || !summary || (summary.cost || 0) <= 0}
+            disabled={processing || loadingTokens || !summary || totalCost <= 0}
           >
             {processing ? (
               <>
@@ -200,11 +203,7 @@ export function TokenPaymentModal({
             ) : (
               <>
                 <CreditCard className="mr-2 h-4 w-4" />
-                Оплатить{" "}
-                {summary?.cost?.toFixed(2) ||
-                  unpaidTokens?.summary?.totalCost.toFixed(2) ||
-                  "0.00"}{" "}
-                ₽
+                Оплатить {totalCost.toFixed(2)} ₽
               </>
             )}
           </Button>
@@ -213,6 +212,7 @@ export function TokenPaymentModal({
     </Dialog>
   );
 }
+
 
 
 

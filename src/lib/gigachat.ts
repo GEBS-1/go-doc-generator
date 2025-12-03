@@ -308,7 +308,7 @@ export async function generateTextWithGigaChat(
             systemPrompt,
             max_tokens: 2048,
             temperature: 0.7,
-          },
+          } as any,
         });
 
         const choice = response?.choices?.[0]?.message?.content;
