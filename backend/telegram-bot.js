@@ -119,11 +119,21 @@ const getStartKeyboard = () => {
   return {
     reply_markup: {
       keyboard: [
-        [{ text: '🚀 Start / Начать' }]
+        [{ text: '🚀 START' }]
       ],
       resize_keyboard: true,
       one_time_keyboard: false, // Клавиатура всегда видна
+      is_persistent: true, // Клавиатура всегда видна, даже если пользователь скрыл стандартную клавиатуру
     },
+  };
+};
+
+// Функция для добавления клавиатуры Start к любому reply_markup
+const addStartKeyboardToReply = (existingMarkup = {}) => {
+  const startKeyboard = getStartKeyboard().reply_markup;
+  return {
+    ...existingMarkup,
+    ...startKeyboard,
   };
 };
 
@@ -168,6 +178,34 @@ const initTelegramBot = () => {
       bot = new TelegramBot(token, { polling: true });
       console.log('[Telegram Bot] Режим: Polling (development)');
     }
+
+    // Устанавливаем команды бота, чтобы /start была видна в меню (рядом с полем ввода)
+    bot.setMyCommands([
+      { command: 'start', description: '🚀 Начать работу с ботом' },
+      { command: 'subscription', description: '📊 Статус подписки' },
+      { command: 'usage', description: '📄 Использование документов' },
+      { command: 'upgrade', description: '💳 Купить подписку' },
+    ])
+      .then(() => {
+        console.log('[Telegram Bot] Команды бота установлены (доступны через /)');
+      })
+      .catch((error) => {
+        console.error('[Telegram Bot] Ошибка установки команд:', error.message);
+      });
+
+    // Устанавливаем команды бота, чтобы /start была видна в меню (рядом с полем ввода)
+    bot.setMyCommands([
+      { command: 'start', description: '🚀 Начать работу с ботом' },
+      { command: 'subscription', description: '📊 Статус подписки' },
+      { command: 'usage', description: '📄 Использование документов' },
+      { command: 'upgrade', description: '💳 Купить подписку' },
+    ])
+      .then(() => {
+        console.log('[Telegram Bot] ✅ Команды бота установлены (доступны через / рядом с полем ввода)');
+      })
+      .catch((error) => {
+        console.error('[Telegram Bot] Ошибка установки команд:', error.message);
+      });
 
     // Обработка ошибок polling (409 Conflict)
     bot.on('polling_error', (error) => {
@@ -235,8 +273,8 @@ const initTelegramBot = () => {
               },
             }
           );
-          // Устанавливаем постоянную клавиатуру с кнопкой Start (всегда видна внизу)
-          await bot.sendMessage(chatId, '👆 Используйте кнопку ниже для быстрого доступа:', startKeyboard);
+          // Устанавливаем постоянную клавиатуру с кнопкой Start (всегда видна)
+          await bot.sendMessage(chatId, '', startKeyboard);
         } else {
           // Существующий пользователь
           await bot.sendMessage(
@@ -250,8 +288,8 @@ const initTelegramBot = () => {
               },
             }
           );
-          // Устанавливаем постоянную клавиатуру с кнопкой Start (всегда видна внизу)
-          await bot.sendMessage(chatId, '👆 Используйте кнопку ниже для быстрого доступа:', startKeyboard);
+          // Устанавливаем постоянную клавиатуру с кнопкой Start (всегда видна)
+          await bot.sendMessage(chatId, '', startKeyboard);
         }
       } catch (error) {
         console.error('[Telegram Bot] Error in /start:', error);
