@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { StepIndicator } from "@/components/StepIndicator";
@@ -34,6 +34,28 @@ const Generator = () => {
   const [docType, setDocType] = useState<DocumentType>("courseWork");
   const [sourceMaterials, setSourceMaterials] = useState<string>("");
   const [sections, setSections] = useState<Section[]>([]);
+
+  // Восстановление состояния после возврата с оплаты
+  useEffect(() => {
+    const autoDownloadFlag = localStorage.getItem("autoDownloadDocument");
+    const savedData = localStorage.getItem("pendingDocumentDownload");
+    
+    if (autoDownloadFlag === "true" && savedData) {
+      try {
+        const documentData = JSON.parse(savedData);
+        // Восстанавливаем состояние генератора
+        setTheme(documentData.theme || "");
+        setDocType(documentData.docType || "courseWork");
+        setSections(documentData.sections || []);
+        // Автоматически переходим на шаг 5 (TitlePage)
+        setCurrentStep(5);
+      } catch (error) {
+        console.error("Error restoring document state:", error);
+        localStorage.removeItem("autoDownloadDocument");
+        localStorage.removeItem("pendingDocumentDownload");
+      }
+    }
+  }, []);
 
   const handleThemeNext = (newTheme: string, newDocType: DocumentType, materials?: string) => {
     setTheme(newTheme);

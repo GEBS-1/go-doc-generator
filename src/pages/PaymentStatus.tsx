@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useMemo, useEffect } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 
 const PaymentStatus = () => {
   const { state } = useParams<{ state: string }>();
+  const navigate = useNavigate();
 
   const { isSuccess, title, description, actionLabel, actionLink } = useMemo(() => {
     if (state === "success") {
@@ -14,7 +15,7 @@ const PaymentStatus = () => {
         isSuccess: true,
         title: "Оплата успешно проведена",
         description:
-          "Подписка активирована. Мы уже отправили чек на вашу почту и обновили доступ к документам.",
+          "Документ готов к скачиванию. Если скачивание не началось автоматически, нажмите кнопку ниже.",
         actionLabel: "Перейти в генератор",
         actionLink: "/generator",
       };
@@ -29,6 +30,26 @@ const PaymentStatus = () => {
       actionLink: "/#pricing",
     };
   }, [state]);
+
+  // Автоматическое перенаправление после успешной оплаты
+  useEffect(() => {
+    if (state === "success") {
+      // Проверяем, есть ли сохраненные данные документа
+      const savedData = localStorage.getItem("pendingDocumentDownload");
+      if (savedData) {
+        // Устанавливаем флаг для автоматического скачивания
+        localStorage.setItem("autoDownloadDocument", "true");
+        // Перенаправляем на генератор через 2 секунды
+        setTimeout(() => {
+          navigate("/generator");
+        }, 2000);
+      }
+    } else {
+      // Если оплата не прошла, очищаем сохраненные данные
+      localStorage.removeItem("pendingDocumentDownload");
+      localStorage.removeItem("autoDownloadDocument");
+    }
+  }, [state, navigate]);
 
   return (
     <div className="flex min-h-screen flex-col">

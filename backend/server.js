@@ -38,6 +38,11 @@ if (!TELEGRAM_BOT_TOKEN) {
 
 if (!YOOKASSA_SHOP_ID || !YOOKASSA_SECRET_KEY) {
   console.warn('[Payments] YooKassa переменные окружения не заданы. Оплата недоступна.');
+  console.warn('[Payments] YOOKASSA_SHOP_ID:', YOOKASSA_SHOP_ID ? 'задан' : 'НЕ ЗАДАН');
+  console.warn('[Payments] YOOKASSA_SECRET_KEY:', YOOKASSA_SECRET_KEY ? 'задан' : 'НЕ ЗАДАН');
+} else {
+  console.log('[Payments] ✅ YooKassa настроен успешно');
+  console.log('[Payments] Shop ID:', YOOKASSA_SHOP_ID.substring(0, 10) + '...');
 }
 
 const checkout = YOOKASSA_SHOP_ID && YOOKASSA_SECRET_KEY
@@ -138,8 +143,9 @@ const SUBSCRIPTION_PLANS = {
   },
 };
 
-const PAYMENT_SUCCESS_URL = PAYMENT_RETURN_URL || `${DEFAULT_FRONTEND_ORIGIN}/payment/success`;
-const PAYMENT_FAIL_URL = process.env.PAYMENT_FAIL_URL || `${DEFAULT_FRONTEND_ORIGIN}/payment/failed`;
+// Для HashRouter нужен # в URL
+const PAYMENT_SUCCESS_URL = PAYMENT_RETURN_URL || `${DEFAULT_FRONTEND_ORIGIN}/#/payment/success`;
+const PAYMENT_FAIL_URL = process.env.PAYMENT_FAIL_URL || `${DEFAULT_FRONTEND_ORIGIN}/#/payment/failed`;
 
 const AUTH_TOKEN_TTL = process.env.AUTH_TOKEN_TTL || '7d';
 

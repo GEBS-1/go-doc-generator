@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -108,6 +108,35 @@ export const TitlePage = ({ sections, theme, docType, onBack }: TitlePageProps) 
         });
     }
   }, [token, docType]);
+
+  // Флаг для автоматического скачивания после оплаты
+  const [shouldAutoDownload, setShouldAutoDownload] = useState(false);
+  
+  // Проверка на возврат после успешной оплаты
+  useEffect(() => {
+    const autoDownloadFlag = localStorage.getItem("autoDownloadDocument");
+    const savedData = localStorage.getItem("pendingDocumentDownload");
+    
+    if (autoDownloadFlag === "true" && savedData) {
+      try {
+        const documentData = JSON.parse(savedData);
+        // Проверяем, что данные соответствуют текущему документу
+        if (documentData.theme === theme && documentData.docType === docType) {
+          // Загружаем сохраненные titleFields, если они есть
+          if (documentData.titleFields) {
+            setTitleFields(prev => ({ ...prev, ...documentData.titleFields }));
+          }
+          // Устанавливаем флаг для автоматического скачивания
+          setShouldAutoDownload(true);
+          toast.success("Оплата успешно проведена! Документ готов к скачиванию.");
+        }
+      } catch (error) {
+        console.error("Error loading saved document data:", error);
+        localStorage.removeItem("autoDownloadDocument");
+        localStorage.removeItem("pendingDocumentDownload");
+      }
+    }
+  }, [theme, docType]);
 
   const selectedDocType =
     DOC_TYPE_OPTIONS.find((option) => option.value === titleFields.documentType) ?? DOC_TYPE_OPTIONS[0];
@@ -1122,6 +1151,26 @@ export const TitlePage = ({ sections, theme, docType, onBack }: TitlePageProps) 
       console.error("Error generating document:", error);
     }
   };
+
+  // Автоматическое скачивание после возврата с оплаты
+  useEffect(() => {
+    if (shouldAutoDownload && titleFields.theme && titleFields.author) {
+      // Небольшая задержка, чтобы убедиться, что все state обновлены и компонент полностью отрендерился
+      const timer = setTimeout(() => {
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        generateDocxDocument();
+        // Очищаем флаги после скачивания
+        localStorage.removeItem("autoDownloadDocument");
+        localStorage.removeItem("pendingDocumentDownload");
+        setShouldAutoDownload(false);
+      }, 1500);
+      
+      return () => clearTimeout(timer);
+    }
+    // generateDocxDocument не добавляем в зависимости, так как она определена в компоненте
+    // и использует локальные состояния через замыкание
+  }, [shouldAutoDownload, titleFields.theme, titleFields.author]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -1141,6 +1190,17 @@ export const TitlePage = ({ sections, theme, docType, onBack }: TitlePageProps) 
         });
 
         if (paymentData.confirmationUrl) {
+          // Сохраняем данные документа перед оплатой
+          const documentData = {
+            sections,
+            theme,
+            docType,
+            titleFields,
+            paymentId: paymentData.paymentId,
+            timestamp: Date.now(),
+          };
+          localStorage.setItem('pendingDocumentDownload', JSON.stringify(documentData));
+          
           window.location.href = paymentData.confirmationUrl;
         } else {
           toast.error("Не удалось создать платёж");
