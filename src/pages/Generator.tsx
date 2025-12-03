@@ -99,6 +99,7 @@ const Generator = () => {
               <TitlePage
                 sections={sections}
                 theme={theme}
+                docType={docType}
                 onBack={() => setCurrentStep(4)}
               />
             )}

@@ -143,6 +143,15 @@ const PAYMENT_FAIL_URL = process.env.PAYMENT_FAIL_URL || `${DEFAULT_FRONTEND_ORI
 
 const AUTH_TOKEN_TTL = process.env.AUTH_TOKEN_TTL || '7d';
 
+// Фиксированные цены на документы (в рублях)
+const DOCUMENT_PRICES = {
+  essay: 99,      // Реферат
+  report: 99,     // Отчёт
+  article: 99,    // Статья
+  courseWork: 199, // Курсовая работа
+  diploma: 199,   // Дипломная работа (ВКР)
+};
+
 const planMeta = (planId) => SUBSCRIPTION_PLANS[planId] || null;
 
 const calculateNextResetDate = (from = new Date()) => {
@@ -996,12 +1005,28 @@ app.post('/api/payments/webhook', async (req, res) => {
       console.warn('Webhook без userId, невозможно создать запись платежа:', paymentId);
     }
 
-    if (event.event === 'payment.succeeded' && metadata.userId && metadata.planId) {
-      const plan = planMeta(metadata.planId);
-      const planName = plan?.name || metadata.planId;
-      await applySubscription(Number(metadata.userId), metadata.planId);
-      // Отправляем уведомление в Telegram
-      await notifyPaymentSuccess(Number(metadata.userId), planName);
+    if (event.event === 'payment.succeeded' && metadata.userId) {
+      // Обработка платежей за подписки
+      if (metadata.planId) {
+        const plan = planMeta(metadata.planId);
+        const planName = plan?.name || metadata.planId;
+        await applySubscription(Number(metadata.userId), metadata.planId);
+        // Отправляем уведомление в Telegram
+        await notifyPaymentSuccess(Number(metadata.userId), planName);
+      }
+      // Обработка платежей за документы (фиксированные цены)
+      else if (metadata.type === 'document' && metadata.docType) {
+        const docTypeLabels = {
+          essay: 'Реферат',
+          report: 'Отчёт',
+          article: 'Статья',
+          courseWork: 'Курсовая работа',
+          diploma: 'Выпускная квалификационная работа',
+        };
+        const docName = docTypeLabels[metadata.docType] || metadata.docType;
+        // Отправляем уведомление в Telegram
+        await notifyPaymentSuccess(Number(metadata.userId), `Оплата документа: ${docName}`);
+      }
     }
 
     if (event.event === 'payment.canceled' && metadata.userId) {
@@ -1017,12 +1042,117 @@ app.post('/api/payments/webhook', async (req, res) => {
       }
     }
 
+
     res.status(200).json({ status: 'ok' });
   } catch (error) {
     console.error('YooKassa webhook error:', error);
     res.status(500).json({
       error: 'Ошибка обработки webhook',
       details: error.message,
+    });
+  }
+});
+
+// Получение цены документа по типу
+app.get('/api/payments/document-price', requireAuth, async (req, res) => {
+  try {
+    const { docType } = req.query;
+
+    if (!docType || typeof docType !== 'string') {
+      return res.status(400).json({
+        error: 'Не указан тип документа',
+      });
+    }
+
+    const price = DOCUMENT_PRICES[docType];
+
+    if (!price) {
+      return res.status(400).json({
+        error: 'Неизвестный тип документа',
+      });
+    }
+
+    res.json({
+      docType,
+      price,
+      currency: 'RUB',
+    });
+  } catch (error) {
+    console.error('Get document price error:', error);
+    res.status(500).json({
+      error: 'Не удалось получить цену документа',
+      details: error.message,
+    });
+  }
+});
+
+// Создание платежа для документа
+app.post('/api/payments/create-document', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.sub;
+    const { docType } = req.body;
+
+    if (!checkout) {
+      return res.status(503).json({
+        error: 'Платёжный шлюз не настроен',
+      });
+    }
+
+    if (!docType || typeof docType !== 'string') {
+      return res.status(400).json({
+        error: 'Не указан тип документа',
+      });
+    }
+
+    const price = DOCUMENT_PRICES[docType];
+
+    if (!price) {
+      return res.status(400).json({
+        error: 'Неизвестный тип документа',
+      });
+    }
+
+    const docTypeLabels = {
+      essay: 'Реферат',
+      report: 'Отчёт',
+      article: 'Статья',
+      courseWork: 'Курсовая работа',
+      diploma: 'Выпускная квалификационная работа',
+    };
+
+    const idempotenceKey = crypto.randomUUID();
+    const payment = await checkout.createPayment(
+      {
+        amount: {
+          value: price.toFixed(2),
+          currency: 'RUB',
+        },
+        confirmation: {
+          type: 'redirect',
+          return_url: PAYMENT_SUCCESS_URL,
+        },
+        capture: true,
+        description: `DocuGen: ${docTypeLabels[docType] || docType}`,
+        metadata: {
+          userId: req.user.sub,
+          type: 'document',
+          docType: docType,
+        },
+      },
+      idempotenceKey
+    );
+
+    res.json({
+      paymentId: payment.id,
+      confirmationUrl: payment.confirmation?.confirmation_url || null,
+      amount: price,
+      docType,
+    });
+  } catch (error) {
+    console.error('Create document payment error:', error);
+    res.status(500).json({
+      error: 'Не удалось создать платёж',
+      details: error.response?.data || error.message,
     });
   }
 });
@@ -1408,27 +1538,35 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
 
-// Инициализация Telegram бота
-// Инициализируем бота после того, как база данных будет готова
-const { pool } = require('./db');
-pool.query('SELECT 1')
-  .then(() => {
-    console.log('[Server] База данных подключена, инициализируем Telegram бота...');
-    initTelegramBot();
-  })
-  .catch((error) => {
-    console.error('[Server] Ошибка подключения к базе данных:', error);
-    console.warn('[Server] Telegram бот не будет запущен');
-  });
-
-app.listen(PORT, HOST, () => {
+// Запускаем сервер сразу, без ожидания БД
+const server = app.listen(PORT, HOST, () => {
   console.log(`🚀 GigaChat Proxy Server запущен на ${HOST}:${PORT}`);
   console.log(`📡 OAuth endpoint: POST /api/gigachat-oauth/*`);
   console.log(`📡 API endpoint: POST /api/gigachat-api/*`);
   console.log(`📡 Generate endpoint: POST /api/gigachat/generate`);
   console.log(`💚 Health check: GET /health`);
+  
+  // Инициализируем Telegram бота асинхронно ПОСЛЕ запуска сервера
+  // Это не блокирует старт сервера и позволяет Render обнаружить открытый порт
   if (TELEGRAM_BOT_TOKEN) {
     console.log(`🤖 Telegram Bot: инициализация...`);
+    
+    // Проверяем БД с небольшой задержкой, чтобы дать серверу время запуститься
+    setTimeout(async () => {
+      try {
+        const { pool } = require('./db');
+        if (pool) {
+          await pool.query('SELECT 1');
+          console.log('[Server] База данных подключена, инициализируем Telegram бота...');
+          initTelegramBot();
+        } else {
+          console.warn('[Server] База данных недоступна. Telegram бот не будет запущен.');
+        }
+      } catch (error) {
+        console.error('[Server] Ошибка подключения к базе данных:', error.message);
+        console.warn('[Server] Telegram бот не будет запущен');
+      }
+    }, 1000); // Задержка 1 секунда после старта сервера
   }
 });
 

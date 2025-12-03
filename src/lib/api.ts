@@ -11,8 +11,21 @@ export class ApiError extends Error {
   }
 }
 
-export interface ApiFetchOptions extends RequestInit {
+export interface ApiFetchOptions {
   token?: string | null;
+  method?: RequestInit['method'];
+  headers?: RequestInit['headers'];
+  body?: RequestInit['body'] | Record<string, any> | any[];
+  cache?: RequestInit['cache'];
+  credentials?: RequestInit['credentials'];
+  integrity?: RequestInit['integrity'];
+  keepalive?: RequestInit['keepalive'];
+  mode?: RequestInit['mode'];
+  redirect?: RequestInit['redirect'];
+  referrer?: RequestInit['referrer'];
+  referrerPolicy?: RequestInit['referrerPolicy'];
+  signal?: RequestInit['signal'];
+  window?: RequestInit['window'];
 }
 
 const normalizeBaseUrl = (baseUrl?: string) => {
@@ -39,7 +52,7 @@ export async function apiFetch<TResponse = unknown>(
     baseHeaders.Authorization = `Bearer ${token}`;
   }
 
-  let requestBody = body;
+  let requestBody: BodyInit | undefined = body as BodyInit | undefined;
 
   if (requestBody && !(requestBody instanceof FormData)) {
     if (!baseHeaders["Content-Type"]) {
@@ -47,7 +60,7 @@ export async function apiFetch<TResponse = unknown>(
     }
 
     if (typeof requestBody !== "string") {
-      requestBody = JSON.stringify(requestBody);
+      requestBody = JSON.stringify(requestBody) as BodyInit;
     }
   }
 
