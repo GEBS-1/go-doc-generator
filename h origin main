@@ -1,0 +1,21 @@
+[1mdiff --git a/backend/server.js b/backend/server.js[m
+[1mindex 836a84f..3618930 100644[m
+[1m--- a/backend/server.js[m
+[1m+++ b/backend/server.js[m
+[36m@@ -145,11 +145,11 @@[m [mconst AUTH_TOKEN_TTL = process.env.AUTH_TOKEN_TTL || '7d';[m
+ [m
+ // Фиксированные цены на документы (в рублях)[m
+ const DOCUMENT_PRICES = {[m
+[31m-  essay: 99,      // Реферат[m
+[31m-  report: 99,     // Отчёт[m
+[31m-  article: 99,    // Статья[m
+[31m-  courseWork: 199, // Курсовая работа[m
+[31m-  diploma: 199,   // Дипломная работа (ВКР)[m
+[32m+[m[32m  essay: 99,       // Реферат[m
+[32m+[m[32m  article: 179,    // Статья[m
+[32m+[m[32m  report: 179,     // Отчёт[m
+[32m+[m[32m  courseWork: 179, // Курсовая работа[m
+[32m+[m[32m  diploma: 299,    // Дипломная работа (ВКР)[m
+ };[m
+ [m
+ const planMeta = (planId) => SUBSCRIPTION_PLANS[planId] || null;[m

@@ -145,11 +145,11 @@ const AUTH_TOKEN_TTL = process.env.AUTH_TOKEN_TTL || '7d';
 
 // Фиксированные цены на документы (в рублях)
 const DOCUMENT_PRICES = {
-  essay: 99,      // Реферат
-  report: 99,     // Отчёт
-  article: 99,    // Статья
-  courseWork: 199, // Курсовая работа
-  diploma: 199,   // Дипломная работа (ВКР)
+  essay: 99,       // Реферат
+  article: 179,    // Статья
+  report: 179,     // Отчёт
+  courseWork: 179, // Курсовая работа
+  diploma: 299,    // Дипломная работа (ВКР)
 };
 
 const planMeta = (planId) => SUBSCRIPTION_PLANS[planId] || null;
