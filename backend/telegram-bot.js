@@ -274,7 +274,7 @@ const initTelegramBot = () => {
             }
           );
           // Устанавливаем постоянную клавиатуру с кнопкой Start (всегда видна)
-          await bot.sendMessage(chatId, '', startKeyboard);
+          await bot.sendMessage(chatId, '💡 Используйте кнопку START внизу для быстрого доступа', startKeyboard);
         } else {
           // Существующий пользователь
           await bot.sendMessage(
@@ -289,7 +289,7 @@ const initTelegramBot = () => {
             }
           );
           // Устанавливаем постоянную клавиатуру с кнопкой Start (всегда видна)
-          await bot.sendMessage(chatId, '', startKeyboard);
+          await bot.sendMessage(chatId, '💡 Используйте кнопку START внизу для быстрого доступа', startKeyboard);
         }
       } catch (error) {
         console.error('[Telegram Bot] Error in /start:', error);
