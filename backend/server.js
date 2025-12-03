@@ -13,6 +13,7 @@ const {
   notifyDocumentGenerated,
   notifySubscriptionExpiring,
   notifyUserRegistered,
+  triggerStartCommandForUser,
 } = require('./telegram-bot');
 
 const app = express();
@@ -375,8 +376,9 @@ const upsertTelegramUser = async (data) => {
   const user = await fetchUserWithSubscription(newUserId);
   const ensured = await ensureFreeSubscription(user);
   
-  // Отправляем уведомление о регистрации в Telegram
+  // Отправляем уведомление о регистрации в Telegram и автоматически вызываем /start
   try {
+    // notifyUserRegistered теперь автоматически вызывает /start внутри себя
     await notifyUserRegistered(telegramId, data.first_name);
   } catch (error) {
     console.error('[Auth] Ошибка отправки уведомления о регистрации:', error);

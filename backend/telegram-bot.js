@@ -114,6 +114,19 @@ const isValidTelegramUrl = (url) => {
   }
 };
 
+// Постоянная клавиатура с кнопкой Start (всегда видна внизу экрана)
+const getStartKeyboard = () => {
+  return {
+    reply_markup: {
+      keyboard: [
+        [{ text: '🚀 Start / Начать' }]
+      ],
+      resize_keyboard: true,
+      one_time_keyboard: false, // Клавиатура всегда видна
+    },
+  };
+};
+
 const initTelegramBot = () => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
@@ -200,10 +213,14 @@ const initTelegramBot = () => {
           [telegramId]
         );
 
-        const keyboard = [];
-        // Добавляем только кнопку с ссылкой для авторизации
-        keyboard.push([{ text: '🔐 Войти на сайт', url: authLink }]);
+        const inlineKeyboard = [];
+        // Добавляем кнопку с ссылкой для авторизации (inline)
+        inlineKeyboard.push([{ text: '🔐 Войти на сайт', url: authLink }]);
+        
+        // Получаем постоянную клавиатуру с кнопкой Start
+        const startKeyboard = getStartKeyboard();
 
+        // Устанавливаем постоянную клавиатуру с кнопкой Start (всегда видна)
         if (registrationResult.isNew) {
           // Новый пользователь - приветствие с регистрацией
           await bot.sendMessage(
@@ -214,10 +231,12 @@ const initTelegramBot = () => {
             `(Ссылка действительна 5 минут)`,
             {
               reply_markup: {
-                inline_keyboard: keyboard,
+                inline_keyboard: inlineKeyboard,
               },
             }
           );
+          // Устанавливаем постоянную клавиатуру с кнопкой Start (всегда видна внизу)
+          await bot.sendMessage(chatId, '👆 Используйте кнопку ниже для быстрого доступа:', startKeyboard);
         } else {
           // Существующий пользователь
           await bot.sendMessage(
@@ -227,10 +246,12 @@ const initTelegramBot = () => {
             `(Ссылка действительна 5 минут)`,
             {
               reply_markup: {
-                inline_keyboard: keyboard,
+                inline_keyboard: inlineKeyboard,
               },
             }
           );
+          // Устанавливаем постоянную клавиатуру с кнопкой Start (всегда видна внизу)
+          await bot.sendMessage(chatId, '👆 Используйте кнопку ниже для быстрого доступа:', startKeyboard);
         }
       } catch (error) {
         console.error('[Telegram Bot] Error in /start:', error);
@@ -289,6 +310,11 @@ const initTelegramBot = () => {
       if (msg.text && msg.text.startsWith('/')) {
         return;
       }
+      
+      // Пропускаем нажатие на кнопку Start (обрабатывается отдельно)
+      if (msg.text && /^(🚀 )?Start|Начать|СТАРТ|старт$/i.test(msg.text)) {
+        return;
+      }
 
       const chatId = msg.chat.id;
       const telegramId = msg.from.id;
@@ -308,6 +334,23 @@ const initTelegramBot = () => {
           };
           // Вызываем обработчик /start напрямую
           await handleStartCommand(fakeMsg);
+        } else {
+          // Пользователь зарегистрирован - автоматически вызываем /start при первом открытии бота
+          // Это полезно, если пользователь зарегистрировался через виджет, но еще не открывал бота
+          // triggerStartCommandForUser автоматически обработает ситуацию, если бот уже открывался
+          try {
+            await triggerStartCommandForUser(
+              telegramId,
+              msg.from.first_name,
+              msg.from.username
+            );
+          } catch (error) {
+            // Игнорируем ошибки - возможно пользователь уже получил приветствие или не открыл бота
+            // Логируем только для отладки
+            if (error.response?.body?.error_code !== 400) {
+              console.log(`[Telegram Bot] Не удалось вызвать /start для пользователя ${telegramId}:`, error.message);
+            }
+          }
         }
       } catch (error) {
         console.error('[Telegram Bot] Error in message handler:', error);
@@ -316,6 +359,12 @@ const initTelegramBot = () => {
 
     // Обработка команды /start
     bot.onText(/\/start/, handleStartCommand);
+    
+    // Обработка нажатия на кнопку "Start" (постоянная клавиатура)
+    bot.onText(/^(🚀 )?Start|Начать|СТАРТ|старт$/i, async (msg) => {
+      // Обрабатываем как команду /start
+      await handleStartCommand(msg);
+    });
 
     // Обработка команды /subscription
     bot.onText(/\/subscription/, async (msg) => {
@@ -623,6 +672,89 @@ const notifySubscriptionExpiring = async (userId, daysLeft) => {
 };
 
 /**
+ * Автоматический вызов команды /start для пользователя (программно)
+ * Используется при регистрации через виджет или при открытии бота
+ */
+const triggerStartCommandForUser = async (telegramId, firstName, username = null) => {
+  try {
+    if (!bot) {
+      console.warn('[Telegram Bot] Бот не инициализирован, /start не может быть вызван');
+      return false;
+    }
+
+    // Проверяем готовность базы данных
+    const isReady = await checkDbReady();
+    if (!isReady) {
+      console.warn('[Telegram Bot] База данных не готова, /start не может быть вызван');
+      return false;
+    }
+
+    // Получаем данные пользователя из БД
+    const user = await dbGet(
+      `SELECT u.*, s.plan, s.status, s.docs_generated, s.docs_limit
+       FROM users u
+       LEFT JOIN subscriptions s ON u.id = s.user_id
+       WHERE u.telegram_id = ?`,
+      [telegramId]
+    );
+
+    if (!user) {
+      console.warn(`[Telegram Bot] Пользователь с telegram_id ${telegramId} не найден в БД`);
+      return false;
+    }
+
+    // Генерируем временный токен для авторизации
+    const authToken = await generateAuthToken(telegramId);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+    const authLink = `${frontendUrl}/#/auth?token=${authToken}`;
+
+    const keyboard = [];
+    keyboard.push([{ text: '🔐 Войти на сайт', url: authLink }]);
+
+    // Определяем, новый ли пользователь (проверяем дату создания)
+    const createdAt = new Date(user.created_at);
+    const now = new Date();
+    const isNewUser = (now - createdAt) < 60000; // Если зарегистрирован менее минуты назад
+
+    const messageText = isNewUser
+      ? `🎉 Добро пожаловать в DocuGen, ${firstName || username || 'пользователь'}!\n\n` +
+        `✅ Вы успешно зарегистрированы!\n\n` +
+        `🔐 Нажмите кнопку ниже, чтобы войти на сайт:\n` +
+        `(Ссылка действительна 5 минут)`
+      : `👋 Привет, ${firstName || username || 'пользователь'}!\n\n` +
+        `🔐 Нажмите кнопку ниже, чтобы войти на сайт:\n` +
+        `(Ссылка действительна 5 минут)`;
+
+    // Отправляем сообщение с inline кнопкой входа
+    await bot.sendMessage(
+      telegramId,
+      messageText,
+      {
+        reply_markup: {
+          inline_keyboard: keyboard,
+        },
+      }
+    );
+    
+    // Устанавливаем постоянную клавиатуру с кнопкой Start (всегда видна)
+    const startKeyboard = getStartKeyboard();
+    await bot.sendMessage(telegramId, '👆 Используйте кнопку ниже для быстрого доступа:', startKeyboard);
+
+    console.log(`[Telegram Bot] Автоматически вызван /start для пользователя ${telegramId}`);
+    return true;
+  } catch (error) {
+    console.error('[Telegram Bot] Error in triggerStartCommandForUser:', error);
+    // Если ошибка "chat not found", пользователь еще не открыл бота - это нормально
+    if (error.response?.body?.error_code === 400 && 
+        error.response?.body?.description?.includes('chat not found')) {
+      console.log(`[Telegram Bot] Пользователь ${telegramId} еще не открыл бота, /start будет вызван при открытии`);
+      return false;
+    }
+    return false;
+  }
+};
+
+/**
  * Уведомление о регистрации нового пользователя
  */
 const notifyUserRegistered = async (telegramId, firstName) => {
@@ -631,6 +763,9 @@ const notifyUserRegistered = async (telegramId, firstName) => {
       console.warn('[Telegram Bot] Бот не инициализирован, уведомление о регистрации не отправлено');
       return false;
     }
+
+    // Автоматически вызываем /start при регистрации
+    await triggerStartCommandForUser(telegramId, firstName);
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
     const keyboard = [];
@@ -642,15 +777,10 @@ const notifyUserRegistered = async (telegramId, firstName) => {
       { text: '📄 Использование', callback_data: 'usage' },
     ]);
 
+    // Отправляем дополнительное сообщение с информацией о командах
     return await sendNotification(
       telegramId,
-      `🎉 Добро пожаловать в DocuGen, ${firstName || 'пользователь'}!\n\n` +
-      `✅ Вы успешно зарегистрированы!\n\n` +
-      `📝 Теперь вы можете:\n` +
-      `• Генерировать документы по ГОСТ\n` +
-      `• Использовать команды бота для управления подпиской\n` +
-      `• Отслеживать использование документов\n\n` +
-      `Используйте команды:\n` +
+      `📝 Дополнительные команды бота:\n\n` +
       `/subscription - статус подписки\n` +
       `/usage - использовано документов\n` +
       `/upgrade - купить подписку`,
@@ -673,6 +803,7 @@ module.exports = {
   notifyDocumentGenerated,
   notifySubscriptionExpiring,
   notifyUserRegistered,
+  triggerStartCommandForUser,
   getBot: () => bot,
 };
 
