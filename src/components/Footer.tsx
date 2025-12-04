@@ -77,7 +77,7 @@ export const Footer = () => {
         </div>
         
         <div className="pt-8 border-t text-center text-sm text-muted-foreground">
-          © 2025 DocuGen AI. Все права защищены.
+          © 2025 DocuGen AI. Все права защищены. ИНН: [165723279001]
         </div>
       </div>
     </footer>

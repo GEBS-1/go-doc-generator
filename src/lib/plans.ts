@@ -18,6 +18,7 @@ export const subscriptionPlans: SubscriptionPlan[] = [
   {
     id: "free",
     name: "Бесплатный",
+    // amount: 0, // старое значение
     amount: 0,
     currency: "RUB",
     type: "free",
@@ -33,7 +34,8 @@ export const subscriptionPlans: SubscriptionPlan[] = [
   {
     id: "basic",
     name: "Базовый",
-    amount: 199,
+    // amount: 199, // старое значение
+    amount: 179, // цена из DOCUMENT_PRICES (статья, отчёт, курсовая)
     currency: "RUB",
     type: "subscription",
     period: "monthly",
@@ -51,7 +53,8 @@ export const subscriptionPlans: SubscriptionPlan[] = [
   {
     id: "premium",
     name: "Премиум",
-    amount: 499,
+    // amount: 499, // старое значение
+    amount: 299, // цена из DOCUMENT_PRICES (дипломная работа)
     currency: "RUB",
     type: "subscription",
     period: "monthly",
@@ -68,6 +71,7 @@ export const subscriptionPlans: SubscriptionPlan[] = [
   {
     id: "single",
     name: "Разовый документ",
+    // amount: 99, // цена из DOCUMENT_PRICES (реферат)
     amount: 99,
     currency: "RUB",
     type: "one-time",
