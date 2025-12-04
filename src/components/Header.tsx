@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Crown, FileText, LogOut, Settings, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -10,9 +10,15 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
+import { subscriptionPlans, formatPlanAmount } from "@/lib/plans";
+import { apiFetch, ApiError } from "@/lib/api";
+import { toast } from "sonner";
 
 const getInitials = (name?: string | null) => {
   if (!name) {
@@ -26,8 +32,9 @@ const getInitials = (name?: string | null) => {
 };
 
 export const Header = () => {
-  const { user, isAuthenticated, promptLogin, logout } = useAuth();
+  const { user, isAuthenticated, promptLogin, logout, token, refreshProfile } = useAuth();
   const authRequired = import.meta.env.VITE_REQUIRE_AUTH !== "false";
+  const [processingPlan, setProcessingPlan] = useState<string | null>(null);
   
   // Отладка для проверки переменных окружения
   if (typeof window !== 'undefined') {
@@ -59,6 +66,50 @@ export const Header = () => {
           ? "Разовый доступ"
           : "Бесплатный"
     : null;
+
+  const handleSelectPlan = async (planId: string) => {
+    if (!token) {
+      toast.error("Не удалось определить токен авторизации");
+      return;
+    }
+
+    setProcessingPlan(planId);
+    try {
+      const response = await apiFetch<{
+        status: "activated" | "pending";
+        confirmationUrl?: string | null;
+      }>("/api/payments/create", {
+        method: "POST",
+        token,
+        body: { planId },
+      });
+
+      if (response.status === "activated") {
+        toast.success("Подписка активирована");
+        await refreshProfile();
+        return;
+      }
+
+      if (response.confirmationUrl) {
+        window.open(response.confirmationUrl, "_blank", "noopener,noreferrer");
+        toast.info("Оплата откроется в новой вкладке YooKassa");
+      } else {
+        toast.message("Платёж создан", {
+          description: "Перейдите по ссылке YooKassa для завершения оплаты.",
+        });
+      }
+    } catch (error) {
+      if (error instanceof ApiError) {
+        toast.error(error.message);
+      } else if (error instanceof Error) {
+        toast.error(error.message);
+      } else {
+        toast.error("Не удалось оформить подписку");
+      }
+    } finally {
+      setProcessingPlan(null);
+    }
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -131,12 +182,43 @@ export const Header = () => {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem className="gap-2">
-                    <Crown className="h-4 w-4" />
-                    {user.subscription?.status === "active"
-                      ? `План: ${user.subscription.planName}`
-                      : "План: не активен"}
-                  </DropdownMenuItem>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="gap-2">
+                      <Crown className="h-4 w-4" />
+                      {user.subscription?.status === "active"
+                        ? `План: ${user.subscription.planName}`
+                        : "План: не активен"}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {subscriptionPlans.map((plan) => {
+                        const isActive = plan.id === user?.subscription?.planId && user?.subscription?.status === "active";
+                        const isProcessing = processingPlan === plan.id;
+                        
+                        return (
+                          <DropdownMenuItem
+                            key={plan.id}
+                            onClick={() => handleSelectPlan(plan.id)}
+                            disabled={isActive || isProcessing}
+                          >
+                            <div className="flex items-center justify-between w-full">
+                              <div className="flex flex-col">
+                                <span className="font-medium">{plan.name}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {formatPlanAmount(plan.amount)}
+                                </span>
+                              </div>
+                              {isActive && (
+                                <Badge variant="secondary" className="text-xs">Активен</Badge>
+                              )}
+                              {isProcessing && (
+                                <Badge variant="outline" className="text-xs">Обработка...</Badge>
+                              )}
+                            </div>
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
                   <DropdownMenuItem className="gap-2" disabled>
                     <Settings className="h-4 w-4" />
                     Настройки профиля (скоро)
