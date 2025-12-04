@@ -831,6 +831,80 @@ app.post('/api/auth/telegram', async (req, res) => {
   }
 });
 
+// Специальный endpoint для входа тестового пользователя Юкассы
+app.post('/api/auth/test-login', async (req, res) => {
+  try {
+    const { login, password } = req.body || {};
+
+    // Данные тестового пользователя
+    const TEST_USER = {
+      telegram_id: 999999999,
+      username: 'yookassa_test',
+      password: 'YooKassa2025!Test', // Пароль для тестового пользователя
+    };
+
+    if (!login || !password) {
+      return res.status(400).json({
+        error: 'Логин и пароль обязательны',
+      });
+    }
+
+    // Проверяем, что это тестовый пользователь
+    if (login !== TEST_USER.username || password !== TEST_USER.password) {
+      return res.status(401).json({
+        error: 'Неверный логин или пароль',
+      });
+    }
+
+    // Находим тестового пользователя в БД
+    const userRow = await dbGet(
+      'SELECT * FROM users WHERE telegram_id = ?',
+      [TEST_USER.telegram_id]
+    );
+
+    if (!userRow) {
+      return res.status(404).json({
+        error: 'Тестовый пользователь не найден. Запустите скрипт create-test-user-yookassa.js',
+      });
+    }
+
+    const user = normalizeUserRow(userRow);
+    const subscriptionRow = await dbGet(
+      'SELECT * FROM subscriptions WHERE user_id = ?',
+      [user.id]
+    );
+    const subscription = normalizeSubscriptionRow(subscriptionRow);
+
+    // Создаем токен
+    const token = createToken({
+      sub: user.id,
+      provider: 'telegram',
+      test: true,
+    });
+
+    const sanitizedUser = sanitizeUser({
+      ...user,
+      subscription,
+    });
+
+    console.log('[Auth] Тестовый пользователь успешно авторизован:', {
+      userId: user.id,
+      username: user.username,
+    });
+
+    res.json({
+      token,
+      user: sanitizedUser,
+    });
+  } catch (error) {
+    console.error('[Auth] Ошибка тестового входа:', error);
+    res.status(500).json({
+      error: 'Ошибка авторизации',
+      details: error.message,
+    });
+  }
+});
+
 app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({
     user: req.authUser,
@@ -1502,6 +1576,112 @@ app.post('/api/gigachat/generate', async (req, res) => {
     res.status(500).json({ 
       error: 'Ошибка генерации текста',
       message: error.message 
+    });
+  }
+});
+
+/**
+ * Admin endpoint для создания тестового пользователя Юкассы
+ * Защищен секретным ключом из переменной окружения
+ */
+app.post('/api/admin/create-test-user', express.json(), async (req, res) => {
+  try {
+    const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-me-in-production';
+    const { secret } = req.body || {};
+
+    if (!secret || secret !== ADMIN_SECRET) {
+      return res.status(401).json({
+        error: 'Неавторизован. Требуется правильный секретный ключ.',
+      });
+    }
+
+    // Данные тестового пользователя
+    const TEST_USER = {
+      telegram_id: 999999999,
+      username: 'yookassa_test',
+      first_name: 'Тестовый пользователь Юкасса',
+      photo_url: null,
+    };
+
+    // Проверяем, существует ли уже тестовый пользователь
+    const existingUser = await dbGet(
+      'SELECT * FROM users WHERE telegram_id = $1',
+      [TEST_USER.telegram_id]
+    );
+
+    let userId;
+
+    if (existingUser) {
+      // Обновляем данные пользователя
+      await dbRun(
+        `UPDATE users 
+         SET username = $1, first_name = $2, updated_at = CURRENT_TIMESTAMP 
+         WHERE telegram_id = $3`,
+        [TEST_USER.username, TEST_USER.first_name, TEST_USER.telegram_id]
+      );
+      userId = existingUser.id;
+    } else {
+      // Создаем нового пользователя
+      const result = await dbRun(
+        `INSERT INTO users (telegram_id, username, first_name, photo_url, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         RETURNING id`,
+        [TEST_USER.telegram_id, TEST_USER.username, TEST_USER.first_name, TEST_USER.photo_url]
+      );
+      userId = result.rows?.[0]?.id || result.lastID;
+    }
+
+    // Проверяем, есть ли подписка
+    const existingSubscription = await dbGet(
+      'SELECT * FROM subscriptions WHERE user_id = $1',
+      [userId]
+    );
+
+    if (!existingSubscription) {
+      const now = new Date();
+      const nextReset = new Date(now);
+      nextReset.setMonth(nextReset.getMonth() + 1);
+
+      await dbRun(
+        `INSERT INTO subscriptions (
+          user_id, plan, status, docs_generated, docs_limit, 
+          activated_at, reset_date, created_at, updated_at
+        ) VALUES ($1, $2, 'active', 0, 1, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [userId, 'free', now.toISOString(), nextReset.toISOString()]
+      );
+    }
+
+    // Создаем JWT токен
+    const token = createToken({
+      sub: userId,
+      provider: 'telegram',
+      test: true,
+    });
+
+    console.log('[Admin] Тестовый пользователь для Юкассы создан/обновлен:', {
+      userId,
+      username: TEST_USER.username,
+    });
+
+    res.json({
+      success: true,
+      user: {
+        id: userId,
+        username: TEST_USER.username,
+        firstName: TEST_USER.first_name,
+      },
+      credentials: {
+        login: 'yookassa_test',
+        password: 'YooKassa2025!Test',
+      },
+      token,
+      message: 'Тестовый пользователь успешно создан',
+    });
+  } catch (error) {
+    console.error('[Admin] Ошибка создания тестового пользователя:', error);
+    res.status(500).json({
+      error: 'Ошибка при создании тестового пользователя',
+      details: error.message,
     });
   }
 });

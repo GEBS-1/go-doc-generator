@@ -9,6 +9,7 @@ import NotFound from "./pages/NotFound";
 import PaymentStatus from "./pages/PaymentStatus";
 import Auth from "./pages/Auth";
 import AuthCallback from "./pages/AuthCallback";
+import AuthTest from "./pages/AuthTest";
 
 const queryClient = new QueryClient();
 
@@ -24,6 +25,7 @@ const App = () => (
           <Route path="/payment/:state" element={<PaymentStatus />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/auth/test-login" element={<AuthTest />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
