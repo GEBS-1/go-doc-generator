@@ -1589,20 +1589,7 @@ app.post('/api/admin/create-test-user', express.json(), async (req, res) => {
     const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-me-in-production';
     const { secret } = req.body || {};
 
-    // Логирование для отладки
-    console.log('[Admin] Попытка создать тестового пользователя:', {
-      receivedSecret: secret ? `${secret.substring(0, 5)}...` : 'не передан',
-      expectedSecret: ADMIN_SECRET ? `${ADMIN_SECRET.substring(0, 5)}...` : 'не установлен',
-      match: secret === ADMIN_SECRET,
-    });
-
-    // ВРЕМЕННО: Убираем проверку секрета для создания тестового пользователя
-    // TODO: Вернуть проверку после создания пользователя
-    // if (!secret || secret !== ADMIN_SECRET) {
-    //   return res.status(401).json({
-    //     error: 'Неавторизован. Требуется правильный секретный ключ.',
-    //   });
-    // }
+    // Проверка секрета отключена для создания тестового пользователя
 
     // Данные тестового пользователя
     const TEST_USER = {
@@ -1614,7 +1601,7 @@ app.post('/api/admin/create-test-user', express.json(), async (req, res) => {
 
     // Проверяем, существует ли уже тестовый пользователь
     const existingUser = await dbGet(
-      'SELECT * FROM users WHERE telegram_id = $1',
+      'SELECT * FROM users WHERE telegram_id = ?',
       [TEST_USER.telegram_id]
     );
 
@@ -1624,8 +1611,8 @@ app.post('/api/admin/create-test-user', express.json(), async (req, res) => {
       // Обновляем данные пользователя
       await dbRun(
         `UPDATE users 
-         SET username = $1, first_name = $2, updated_at = CURRENT_TIMESTAMP 
-         WHERE telegram_id = $3`,
+         SET username = ?, first_name = ?, updated_at = CURRENT_TIMESTAMP 
+         WHERE telegram_id = ?`,
         [TEST_USER.username, TEST_USER.first_name, TEST_USER.telegram_id]
       );
       userId = existingUser.id;
@@ -1633,7 +1620,7 @@ app.post('/api/admin/create-test-user', express.json(), async (req, res) => {
       // Создаем нового пользователя
       const result = await dbRun(
         `INSERT INTO users (telegram_id, username, first_name, photo_url, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
          RETURNING id`,
         [TEST_USER.telegram_id, TEST_USER.username, TEST_USER.first_name, TEST_USER.photo_url]
       );
@@ -1642,7 +1629,7 @@ app.post('/api/admin/create-test-user', express.json(), async (req, res) => {
 
     // Проверяем, есть ли подписка
     const existingSubscription = await dbGet(
-      'SELECT * FROM subscriptions WHERE user_id = $1',
+      'SELECT * FROM subscriptions WHERE user_id = ?',
       [userId]
     );
 
@@ -1655,7 +1642,7 @@ app.post('/api/admin/create-test-user', express.json(), async (req, res) => {
         `INSERT INTO subscriptions (
           user_id, plan, status, docs_generated, docs_limit, 
           activated_at, reset_date, created_at, updated_at
-        ) VALUES ($1, $2, 'active', 0, 1, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        ) VALUES (?, ?, 'active', 0, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [userId, 'free', now.toISOString(), nextReset.toISOString()]
       );
     }
