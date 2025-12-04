@@ -96,7 +96,7 @@ export const Pricing = () => {
                   <CardDescription>{plan.description}</CardDescription>
                   <div className="flex items-baseline gap-2">
                     <span className="text-3xl font-bold">{formatPlanAmount(plan.amount)}</span>
-                    {plan.type === "subscription" ? <span className="text-sm text-muted-foreground">в месяц</span> : null}
+                    {plan.type === "subscription" && plan.period === "monthly" ? <span className="text-sm text-muted-foreground">в месяц</span> : null}
                   </div>
                 </CardHeader>
 
